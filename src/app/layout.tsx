@@ -13,6 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://ghost-reviews-ten.vercel.app"),
   title: "ghost.reviews — See the ghosts in your reviews",
   description:
     "Detect coordinated review-bombing attacks on your Google Business Profile. Get a transparent fraud-signal report and a drafted policy-violation removal request you submit to Google.",

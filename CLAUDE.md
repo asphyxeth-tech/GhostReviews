@@ -117,6 +117,14 @@ Tower pipeline (Python, lives in `pipeline/`):
 - Without Tower CLI: `BUSINESS_URL=<URL> python3 pipeline/task.py`
 - See `pipeline/README.md` for the full integration guide and parity notes with the web app.
 
+Web app -> Tower integration:
+
+- `POST /api/analyze-tower` — triggers a deployed Tower run for the given URL, returns `run_seq` immediately
+- `GET /api/analyze-tower/[runSeq]` — polls the run's status; once terminal, returns the extracted `AnalyzeResponse`
+- UI: the "Deep scan via Tower" button under the form drives the trigger + poll flow client-side
+- Server-side env vars needed: `TOWER_API_KEY` (sk-...) and `TOWER_APP_NAME` (defaults to `ghost-reviews-pipeline`)
+- `pipeline/task.py` emits a `__GHOST_RESULT__:{...}` sentinel line so the TS side can extract the structured report from Tower's stdout logs deterministically
+
 ## Submission checklist (by June 10, 10:00 AM ET)
 
 - [x] Working live demo URL (Vercel): https://ghost-reviews-ten.vercel.app/  

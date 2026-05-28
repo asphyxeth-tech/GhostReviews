@@ -232,6 +232,14 @@ def main() -> int:
         "report": report,
     }
 
+    # Single-line sentinel for programmatic consumers (e.g. the Next.js
+    # /api/analyze-tower route extracts this from Tower's run logs).
+    # Tower returns stdout as one log line per print() call; pretty-printed
+    # JSON would be split across many lines and brittle to reassemble, so
+    # we emit a compact one-line version alongside.
+    print(f"__GHOST_RESULT__:{json.dumps(output, separators=(',', ':'))}")
+
+    # Pretty-printed version for human readers running the script directly.
     print(json.dumps(output, indent=2))
     return 0
 

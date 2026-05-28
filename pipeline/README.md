@@ -80,8 +80,22 @@ tower apps logs ghost-reviews-pipeline
 
 The Python `SYSTEM_PROMPT` and `ANALYSIS_REPORT_SCHEMA` mirror the TypeScript versions in [`src/lib/anthropic.ts`](../src/lib/anthropic.ts) and [`src/lib/analysis-schema.ts`](../src/lib/analysis-schema.ts) byte-for-byte. If you modify the analysis behavior, update both — there's no shared source of truth yet (intentional: keeping the surfaces decoupled for the MVP).
 
+## Web app integration
+
+The Next.js app's **"Deep scan via Tower"** button invokes this pipeline via Tower's Control Plane API. Flow:
+
+1. `POST /api/analyze-tower` triggers a run via `POST https://api.tower.dev/v1/apps/ghost-reviews-pipeline/runs`
+2. Browser polls `GET /api/analyze-tower/[runSeq]` every ~2.5s
+3. Each poll calls Tower's `GET /apps/.../runs/{seq}` for status and (once terminal) `GET /apps/.../runs/{seq}/logs` for stdout
+4. The TS side scans the log lines for the `__GHOST_RESULT__:{...}` sentinel emitted by `task.py` and parses the embedded JSON
+
+The integration requires the following env vars on the Next.js side (set in Vercel for production):
+
+- `TOWER_API_KEY` — your Tower API key (get one at https://app.tower.dev → team settings → API Keys)
+- `TOWER_APP_NAME` — defaults to `ghost-reviews-pipeline` (matches `[app].name` in the Towerfile)
+
 ## Roadmap
 
 - [ ] Replace `mock_reviews.json` with a live scrape step using the Nimble API
 - [ ] Add a scheduled-run example (`tower schedules create ...`) for periodic monitoring
-- [ ] Wire the Next.js API route to optionally invoke this Tower app for "deep scan" requests
+- [x] Wire the Next.js API route to invoke this Tower app for "deep scan" requests
