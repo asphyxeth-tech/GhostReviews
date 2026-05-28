@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Pre-commit hook: scan staged diff for common secret patterns.
+#
+# Enable on this clone with:
+#   git config core.hooksPath .githooks
+#
+# Runs in ~100ms. Blocks the commit if any pattern matches.
+# Override (false-positive case only) with: git commit --no-verify
+
+set -e
+
+PATTERNS=(
+  'sk-ant-[a-zA-Z0-9_-]{20,}'                        # Anthropic API keys
+  'sk-proj-[a-zA-Z0-9_-]{20,}'                       # OpenAI API keys (new format)
+  'sk-[a-zA-Z0-9]{40,}'                              # OpenAI API keys (legacy)
+  'AKIA[0-9A-Z]{16}'                                 # AWS access key IDs
+  'ASIA[0-9A-Z]{16}'                                 # AWS temporary access key IDs
+  'ghp_[0-9a-zA-Z]{36}'                              # GitHub personal access tokens
+  'ghs_[0-9a-zA-Z]{36}'                              # GitHub server tokens
+  'gho_[0-9a-zA-Z]{36}'                              # GitHub OAuth tokens
+  'xox[baprs]-[0-9a-zA-Z-]{10,}'                     # Slack tokens
+  'AIza[0-9A-Za-z_-]{35}'                            # Google API keys
+  '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----'  # PEM private keys
+)
+
+ALL_PATTERNS=$(IFS='|'; echo "${PATTERNS[*]}")
+
+LEAK=$(git diff --cached --no-ext-diff -U0 | grep -nE "$ALL_PATTERNS" || true)
+
+if [[ -n "$LEAK" ]]; then
+  echo ""
+  echo "================================================================"
+  echo "  BLOCKED: possible secret detected in staged changes"
+  echo "================================================================"
+  echo ""
+  echo "Matched lines:"
+  echo "$LEAK"
+  echo ""
+  echo "If this is a FALSE positive (e.g. an example in docs), bypass with:"
+  echo "  git commit --no-verify"
+  echo ""
+  echo "If this is REAL, do NOT bypass. Instead:"
+  echo "  1. Remove the secret from the file"
+  echo "  2. Rotate the key at the provider immediately"
+  echo "  3. Re-stage and retry the commit"
+  echo ""
+  exit 1
+fi
+
+exit 0

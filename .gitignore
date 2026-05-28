@@ -46,6 +46,11 @@ ENV/
 # --- Vercel ---
 .vercel
 
+# --- Certificates / private keys ---
+*.pem
+*.key
+*.crt
+
 # --- OS / editor noise ---
 .DS_Store
 Thumbs.db

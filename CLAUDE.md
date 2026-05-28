@@ -92,7 +92,20 @@ Always frame output as **likelihood / signals with reasons** — never a definit
 
 ## Key commands
 
-- (fill in after scaffolding, e.g. `npm run dev`, `npm run build`, Tower deploy command)
+Local development (Next.js):
+
+- `npm install` — install dependencies (first time, or after a teammate adds a package)
+- `npm run dev` — start the dev server at http://localhost:3000 (hot-reload)
+- `npm run build` — production build (runs TypeScript + ESLint, generates static pages)
+- `npm run start` — run the production build locally (after `npm run build`)
+- `npm run lint` — run ESLint
+
+Security:
+
+- `git config core.hooksPath .githooks` — enable the local pre-commit secret scanner (one time per clone)
+- See `SECURITY.md` for the full secret-hygiene policy.
+
+Tower pipeline: _(commands to be added when the Python pipeline lands)_
 
 ## Submission checklist (by June 10, 10:00 AM ET)
 
