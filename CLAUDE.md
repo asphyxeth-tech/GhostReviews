@@ -105,7 +105,17 @@ Security:
 - `git config core.hooksPath .githooks` — enable the local pre-commit secret scanner (one time per clone)
 - See `SECURITY.md` for the full secret-hygiene policy.
 
-Tower pipeline: _(commands to be added when the Python pipeline lands)_
+Tower pipeline (Python, lives in `pipeline/`):
+
+- `pip install -r pipeline/requirements.txt` — install Python deps (just `anthropic`)
+- `pip install -U tower` — install the Tower CLI
+- `tower login` — one-time auth
+- `cd pipeline && tower run --local --parameter business_url=<URL>` — run the pipeline locally
+- `cd pipeline && tower deploy` — push to Tower Cloud
+- `cd pipeline && tower run --parameter business_url=<URL>` — run on Tower Cloud
+- `tower secrets create ANTHROPIC_API_KEY --value "sk-ant-..."` — set the Claude key for cloud runs
+- Without Tower CLI: `BUSINESS_URL=<URL> python3 pipeline/task.py`
+- See `pipeline/README.md` for the full integration guide and parity notes with the web app.
 
 ## Submission checklist (by June 10, 10:00 AM ET)
 

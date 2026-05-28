@@ -33,6 +33,22 @@ Outputs are always framed as **likelihood + transparent reasoning**, never a def
 - **[Next.js](https://nextjs.org/)** (App Router) + **[Tailwind CSS](https://tailwindcss.com/)** — frontend
 - **[Vercel](https://vercel.com/)** — hosting
 
+## Repo layout
+
+```
+.
+├── src/                    Next.js app (the live web interface)
+│   ├── app/                  App Router pages + /api/analyze route
+│   ├── components/           UrlAnalyzeForm + AnalysisReport (results UI)
+│   └── lib/                  Anthropic client, Zod schemas, mock data
+└── pipeline/               Tower app (the batch-mode analysis pipeline)
+    ├── task.py               Python entrypoint
+    ├── Towerfile             Tower app manifest
+    └── README.md             Full setup + deploy guide for the pipeline
+```
+
+The web app (Next.js on Vercel) gives end users an instant report. The Tower pipeline runs the same Claude Opus 4.7 analysis as an orchestration-mode job — same prompt, same schema, same outputs. See [`pipeline/README.md`](./pipeline/README.md) for the Tower integration.
+
 ## Local setup
 
 > Setup steps will be filled in as the app is scaffolded. See `CLAUDE.md` for the working build plan.

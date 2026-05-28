@@ -1,0 +1,14 @@
+[app]
+name = "ghost-reviews-pipeline"
+script = "./task.py"
+source = [
+  "./task.py",
+  "./mock_reviews.json",
+  "./mock_report.json",
+  "./requirements.txt",
+]
+
+[[parameters]]
+name = "business_url"
+description = "Google Business Profile URL whose reviews should be scraped and analyzed."
+default = "https://maps.app.goo.gl/example-business"

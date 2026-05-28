@@ -1,0 +1,58 @@
+[
+  {
+    "id": "r-001",
+    "reviewer_name": "Sarah M.",
+    "reviewer_total_reviews": 47,
+    "rating": 5,
+    "posted_at": "2026-04-15T14:23:00Z",
+    "text": "Came here for my anniversary dinner. The mushroom risotto was perfectly creamy and our server Marco recommended a great Barolo to pair with it. The patio seating was lovely. Will definitely come back!"
+  },
+  {
+    "id": "r-002",
+    "reviewer_name": "David K.",
+    "reviewer_total_reviews": 23,
+    "rating": 4,
+    "posted_at": "2026-04-22T19:05:00Z",
+    "text": "Food was excellent — the seared scallops were the highlight — but the wait for our table was 25 minutes past our reservation time. Service apologized which was nice. Would come back but call ahead to confirm wait times."
+  },
+  {
+    "id": "r-003",
+    "reviewer_name": "John Smith",
+    "reviewer_total_reviews": 1,
+    "rating": 1,
+    "posted_at": "2026-04-28T13:47:00Z",
+    "text": "Terrible place. Staff are rude. Would not recommend to anyone."
+  },
+  {
+    "id": "r-004",
+    "reviewer_name": "Jane Doe",
+    "reviewer_total_reviews": 1,
+    "rating": 1,
+    "posted_at": "2026-04-28T13:51:00Z",
+    "text": "Worst restaurant ever. The staff are extremely rude. Do not go here."
+  },
+  {
+    "id": "r-005",
+    "reviewer_name": "Mike Johnson",
+    "reviewer_total_reviews": 2,
+    "rating": 1,
+    "posted_at": "2026-04-28T13:54:00Z",
+    "text": "Awful experience. Rude staff. I would not recommend this place at all."
+  },
+  {
+    "id": "r-006",
+    "reviewer_name": "Patricia L.",
+    "reviewer_total_reviews": 89,
+    "rating": 1,
+    "posted_at": "2026-05-03T20:30:00Z",
+    "text": "I'm a regular here but tonight was a disaster. Our server forgot our drinks, my entrée came out cold, and when I mentioned it the manager argued with me instead of apologizing. I've recommended this place to many friends over the years but won't be returning."
+  },
+  {
+    "id": "r-007",
+    "reviewer_name": "Carlos R.",
+    "reviewer_total_reviews": 31,
+    "rating": 5,
+    "posted_at": "2026-05-18T12:15:00Z",
+    "text": "Excellent brunch! The eggs benedict with crab were outstanding. Service was attentive without being intrusive. Their cold brew is also some of the best I've had in the city."
+  }
+]
