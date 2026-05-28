@@ -1,0 +1,199 @@
+"use client";
+
+import { useState } from "react";
+import type {
+  AnalyzeResponse,
+  FlaggedReview,
+} from "@/lib/analysis-schema";
+
+const RISK_BADGE: Record<string, { bg: string; text: string; label: string }> = {
+  low: {
+    bg: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+    text: "text-emerald-300",
+    label: "Low risk",
+  },
+  medium: {
+    bg: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+    text: "text-amber-300",
+    label: "Medium risk",
+  },
+  high: {
+    bg: "bg-orange-500/15 text-orange-300 border-orange-500/30",
+    text: "text-orange-300",
+    label: "High risk",
+  },
+  critical: {
+    bg: "bg-red-500/15 text-red-300 border-red-500/30",
+    text: "text-red-300",
+    label: "Critical risk",
+  },
+};
+
+export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
+  const { mode, business_url, generated_at, report } = data;
+  const badge = RISK_BADGE[report.risk_level] ?? RISK_BADGE.medium;
+
+  return (
+    <div className="text-left">
+      {mode === "stub" && (
+        <div className="mb-8 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-2)] px-4 py-3 text-sm text-[color:var(--muted-strong)]">
+          <strong className="text-[color:var(--foreground)]">Demo mode.</strong>{" "}
+          The analysis pipeline is running on a static sample dataset because no{" "}
+          <code className="font-mono text-xs">ANTHROPIC_API_KEY</code> is
+          configured in this environment. The same code path runs against
+          live Claude analysis when the key is present.
+        </div>
+      )}
+
+      <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-7 sm:p-9">
+        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-baseline gap-4">
+            <div className="text-6xl font-semibold tracking-tight tabular-nums sm:text-7xl">
+              {report.overall_risk_score}
+            </div>
+            <div className="text-sm text-[color:var(--muted)]">
+              <div>/ 100</div>
+              <div className="mt-1 font-mono uppercase tracking-widest">
+                risk score
+              </div>
+            </div>
+          </div>
+          <span
+            className={`inline-flex items-center self-start rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-widest ${badge.bg}`}
+          >
+            {badge.label}
+          </span>
+        </div>
+        <p className="mt-6 text-base leading-relaxed text-[color:var(--muted-strong)]">
+          {report.summary}
+        </p>
+        <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-[color:var(--muted)]">
+          <span>
+            Analyzed{" "}
+            <span className="text-[color:var(--foreground)]">
+              {report.total_reviews_analyzed}
+            </span>{" "}
+            reviews
+          </span>
+          <span>
+            Flagged{" "}
+            <span className="text-[color:var(--foreground)]">
+              {report.flagged_reviews.length}
+            </span>
+          </span>
+          <span className="truncate">
+            Source:{" "}
+            <span className="text-[color:var(--foreground)]">{business_url}</span>
+          </span>
+          <span>
+            Generated: {new Date(generated_at).toLocaleString()}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-10">
+        <h3 className="font-mono text-xs uppercase tracking-[0.18em] text-[color:var(--accent)]">
+          Flagged reviews ({report.flagged_reviews.length})
+        </h3>
+        {report.flagged_reviews.length === 0 ? (
+          <p className="mt-6 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6 text-sm text-[color:var(--muted-strong)]">
+            No reviews exhibited the fraud signals we look for. Negative
+            reviews with specific, falsifiable details belong on Google.
+          </p>
+        ) : (
+          <div className="mt-6 space-y-5">
+            {report.flagged_reviews.map((flagged) => (
+              <FlaggedReviewCard key={flagged.review_id} flagged={flagged} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FlaggedReviewCard({ flagged }: { flagged: FlaggedReview }) {
+  const [copied, setCopied] = useState(false);
+  const badge = RISK_BADGE[flagged.risk_level] ?? RISK_BADGE.medium;
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(flagged.removal_request_draft);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2200);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <article className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6 sm:p-7">
+      <header className="flex flex-wrap items-center gap-3 text-sm">
+        <span
+          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold uppercase tracking-widest ${badge.bg}`}
+        >
+          {badge.label}
+        </span>
+        <span className="text-[color:var(--foreground)] font-medium">
+          {flagged.reviewer_name}
+        </span>
+        <span className="text-[color:var(--muted)]">
+          {"★".repeat(flagged.rating)}
+          {"☆".repeat(5 - flagged.rating)}
+        </span>
+        <span className="text-[color:var(--muted)]">
+          {new Date(flagged.posted_at).toLocaleString()}
+        </span>
+      </header>
+
+      <div className="mt-5">
+        <h4 className="font-mono text-xs uppercase tracking-widest text-[color:var(--muted)]">
+          Signals detected ({flagged.signals.length})
+        </h4>
+        <ul className="mt-3 space-y-2 text-sm text-[color:var(--muted-strong)]">
+          {flagged.signals.map((signal, idx) => (
+            <li key={idx} className="flex gap-3">
+              <span
+                aria-hidden
+                className="mt-2 inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[color:var(--accent)]"
+              />
+              <span>{signal}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="mt-5">
+        <h4 className="font-mono text-xs uppercase tracking-widest text-[color:var(--muted)]">
+          Why this is flagged
+        </h4>
+        <p className="mt-3 text-sm leading-relaxed text-[color:var(--muted-strong)]">
+          {flagged.reasoning}
+        </p>
+      </div>
+
+      <div className="mt-6 rounded-xl border border-[color:var(--accent)]/25 bg-[color:var(--accent)]/5 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <h4 className="font-mono text-xs uppercase tracking-widest text-[color:var(--accent)]">
+            Drafted removal request
+          </h4>
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="rounded-md border border-[color:var(--accent)]/40 px-3 py-1 text-xs font-semibold text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/10"
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-[color:var(--muted-strong)]">
+          {flagged.removal_request_draft}
+        </p>
+        <p className="mt-4 text-xs text-[color:var(--muted)]">
+          Substitute your real business name where the draft says{" "}
+          <code className="font-mono">[BUSINESS NAME]</code>, then submit
+          through Google&apos;s policy-violation form on your Business Profile.
+        </p>
+      </div>
+    </article>
+  );
+}
