@@ -109,7 +109,7 @@ Tower pipeline: _(commands to be added when the Python pipeline lands)_
 
 ## Submission checklist (by June 10, 10:00 AM ET)
 
-- [ ] Working live demo URL (Vercel)  
+- [x] Working live demo URL (Vercel): https://ghost-reviews-ten.vercel.app/  
 - [ ] 2–3 min demo video (public YouTube/Loom link)  
 - [ ] README: what it does \+ setup steps  
 - [ ] Devpost project created and tagged to Nimble \+ Tower \+ name.com challenges  

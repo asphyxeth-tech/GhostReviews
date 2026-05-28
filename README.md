@@ -6,7 +6,7 @@ ghost.reviews is a B2B web app that helps local business owners detect coordinat
 
 Built for the [DeveloperWeek New York 2026 Hackathon](https://dwny-2026-hackathon.devpost.com/). Submission deadline: **June 10, 2026, 10:00 AM ET**.
 
-> Demo URL: _coming soon — will be deployed to Vercel before the deadline._
+> **Live demo:** https://ghost-reviews-ten.vercel.app/
 
 ---
 
