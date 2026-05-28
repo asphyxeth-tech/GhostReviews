@@ -71,7 +71,7 @@ export default function Home() {
           <div className="flex items-center gap-2 font-mono text-base tracking-tight">
             <span
               aria-hidden
-              className="inline-block h-2 w-2 rounded-full bg-[color:var(--accent)] shadow-[0_0_16px_var(--accent)]"
+              className="glow-pulse inline-block h-2 w-2 rounded-full bg-[color:var(--accent)]"
             />
             <span>ghost.reviews</span>
           </div>

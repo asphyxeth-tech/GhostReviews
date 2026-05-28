@@ -76,7 +76,11 @@ export function UrlAnalyzeForm() {
             disabled={status === "submitting"}
             className="rounded-lg bg-[color:var(--accent)] px-6 py-3 text-base font-semibold text-black transition hover:bg-[color:var(--accent-glow)] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {status === "submitting" ? "Scanning…" : "Scan for fraud signals"}
+            {status === "submitting" ? (
+              <span className="animate-accent-pulse">Scanning…</span>
+            ) : (
+              "Scan for fraud signals"
+            )}
           </button>
         </div>
         <p className="mt-3 text-sm text-[color:var(--muted)]">

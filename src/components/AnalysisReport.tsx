@@ -34,7 +34,7 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
   const badge = RISK_BADGE[report.risk_level] ?? RISK_BADGE.medium;
 
   return (
-    <div className="text-left">
+    <div className="animate-fade-in-up text-left">
       {mode === "stub" && (
         <div className="mb-8 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-2)] px-4 py-3 text-sm text-[color:var(--muted-strong)]">
           <strong className="text-[color:var(--foreground)]">Demo mode.</strong>{" "}
@@ -127,7 +127,7 @@ function FlaggedReviewCard({ flagged }: { flagged: FlaggedReview }) {
   }
 
   return (
-    <article className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6 sm:p-7">
+    <article className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6 transition-all duration-200 hover:-translate-y-0.5 hover:border-[color:var(--accent)]/40 sm:p-7">
       <header className="flex flex-wrap items-center gap-3 text-sm">
         <span
           className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold uppercase tracking-widest ${badge.bg}`}

@@ -40,3 +40,55 @@ body {
     radial-gradient(ellipse 700px 500px at 90% 110%, color-mix(in srgb, var(--accent-glow) 10%, transparent), transparent 70%),
     radial-gradient(ellipse 600px 500px at 0% 80%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%);
 }
+
+/* Animations — used by interactive UI surfaces */
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes accent-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 65%, transparent);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.45s ease-out both;
+}
+
+.animate-accent-pulse {
+  animation: accent-pulse 1.4s ease-in-out infinite;
+}
+
+.glow-pulse {
+  animation: glow-pulse 3.2s ease-in-out infinite;
+}
+
+/* Reduced-motion users get a stationary UI — accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in-up,
+  .animate-accent-pulse,
+  .glow-pulse {
+    animation: none;
+  }
+}
