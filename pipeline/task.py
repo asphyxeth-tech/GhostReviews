@@ -7,7 +7,7 @@ exactly so the pipeline and the web app produce identical results given
 identical inputs.
 
 Modes (decided by environment):
-    - live mode: ANTHROPIC_API_KEY is set -> calls Claude Opus 4.7
+    - live mode: ANTHROPIC_API_KEY is set -> calls Claude
     - stub mode: no key set -> returns the canned analysis from
       mock_report.json (lets the pipeline run end-to-end for verification
       without burning real tokens)
@@ -37,8 +37,9 @@ HERE = Path(__file__).resolve().parent
 
 # Nimble's structured Google-reviews scrape (v1 SERP surface). We send a
 # small JSON body asking for the `google_maps_reviews` parser and trust
-# Nimble to deliver a structured payload. Auth is HTTP Basic using the
-# raw API key string as the credential.
+# Nimble to deliver a structured payload. Nimble's standard auth is
+# Bearer; the endpoint URL and payload shape are best-effort against
+# their docs and may need adjustment once we exercise against a real key.
 NIMBLE_ENDPOINT = "https://api.webit.live/api/v1/realtime/serp"
 NIMBLE_TIMEOUT_SECONDS = 6
 
@@ -193,10 +194,9 @@ def fetch_reviews_via_nimble(business_url: str) -> list[dict] | None:
         headers={
             "Content-Type": "application/json",
             "Accept": "application/json",
-            # Nimble's v1 SERP surface accepts the raw API key as the
-            # Basic-auth credential. May be refined when we exercise it
-            # against a real key.
-            "Authorization": f"Basic {api_key}",
+            # Nimble's standard auth is Bearer; may be refined when we
+            # exercise it against a real key.
+            "Authorization": f"Bearer {api_key}",
         },
     )
 
@@ -248,10 +248,16 @@ def fetch_reviews_via_nimble(business_url: str) -> list[dict] | None:
             rating = 1
         rating = max(1, min(5, rating))
 
+        # Nimble sometimes returns the reviewer as a string field and
+        # sometimes as a nested {"name": "..."} object. Cover both shapes.
+        author_obj = raw.get("author") if isinstance(raw.get("author"), dict) else {}
+        reviewer_obj = raw.get("reviewer") if isinstance(raw.get("reviewer"), dict) else {}
         reviewer_name = (
             raw.get("reviewer_name")
-            or raw.get("author")
+            or (raw.get("author") if isinstance(raw.get("author"), str) else None)
             or raw.get("name")
+            or (author_obj or {}).get("name")
+            or (reviewer_obj or {}).get("name")
             or "Anonymous"
         )
         if not isinstance(reviewer_name, str):
@@ -352,15 +358,17 @@ def main() -> int:
         )
         return 1
 
-    # Reviews come from Nimble when a key is configured, otherwise from
-    # the bundled mock_reviews.json. Tracked so the sentinel JSON tells
-    # the web app which source produced the report.
-    live_reviews = fetch_reviews_via_nimble(business_url)
-    reviews = live_reviews if live_reviews is not None else load_mock_reviews()
-    reviews_source = "nimble" if live_reviews is not None else "mock"
-
     has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
     mode = "live" if has_key else "stub"
+
+    # In stub mode the canned mock_report.json flags specific review IDs
+    # from mock_reviews.json — so we must NOT swap in Nimble-scraped
+    # reviews there, or the report wouldn't match the batch. Only call
+    # Nimble when we're actually going to analyze those reviews with
+    # Claude. (Also saves a redundant Nimble request.)
+    live_reviews = fetch_reviews_via_nimble(business_url) if has_key else None
+    reviews = live_reviews if live_reviews is not None else load_mock_reviews()
+    reviews_source = "nimble" if live_reviews is not None else "mock"
 
     print(
         f"[ghost.reviews pipeline] mode={mode} "

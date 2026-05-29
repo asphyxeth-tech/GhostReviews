@@ -21,9 +21,9 @@ const RequestSchema = z.object({
 });
 
 // Nimble's structured Google-reviews scrape. This is the v1 SERP surface
-// (api.webit.live) and may be refined when we exercise it against a real
-// key — for now we ask for `google_maps_reviews` and trust their parser.
-// Auth is Basic auth using the raw API key string as the credential.
+// (api.webit.live). Nimble's standard auth is Bearer; the endpoint URL
+// and payload shape are best-effort against their docs and may need
+// adjustment once we exercise against a real key.
 const NIMBLE_ENDPOINT = "https://api.webit.live/api/v1/realtime/serp";
 const NIMBLE_TIMEOUT_MS = 6000;
 
@@ -53,7 +53,7 @@ async function fetchReviewsViaNimble(url: string): Promise<Review[] | null> {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        Authorization: `Basic ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         url,
@@ -93,6 +93,16 @@ async function fetchReviewsViaNimble(url: string): Promise<Review[] | null> {
     const reviews: Review[] = rawReviews.map((raw, index) => {
       const r = (raw ?? {}) as Record<string, unknown>;
       const rating = Number(r.rating ?? r.stars ?? 1);
+      // Nimble sometimes returns the reviewer as a string field and
+      // sometimes as a nested {name: "..."} object. Cover both shapes.
+      const authorObj =
+        r.author && typeof r.author === "object"
+          ? (r.author as Record<string, unknown>)
+          : null;
+      const reviewerObj =
+        r.reviewer && typeof r.reviewer === "object"
+          ? (r.reviewer as Record<string, unknown>)
+          : null;
       return {
         id: `nimble-${index}`,
         reviewer_name:
@@ -102,7 +112,11 @@ async function fetchReviewsViaNimble(url: string): Promise<Review[] | null> {
               ? r.author
               : typeof r.name === "string"
                 ? r.name
-                : "Anonymous",
+                : authorObj && typeof authorObj.name === "string"
+                  ? authorObj.name
+                  : reviewerObj && typeof reviewerObj.name === "string"
+                    ? reviewerObj.name
+                    : "Anonymous",
         reviewer_total_reviews:
           typeof r.reviewer_total_reviews === "number"
             ? r.reviewer_total_reviews
@@ -147,10 +161,12 @@ export async function POST(req: NextRequest) {
     const hasKey = Boolean(process.env.ANTHROPIC_API_KEY);
     const mode: "stub" | "live" = hasKey ? "live" : "stub";
 
-    // Reviews come from Nimble when a key is configured, otherwise from
-    // the static MOCK_REVIEWS dataset. The reviews_source field on the
-    // response lets the UI label this honestly.
-    const liveReviews = await fetchReviewsViaNimble(url);
+    // In stub mode the canned MOCK_REPORT flags specific review IDs from
+    // MOCK_REVIEWS — so we must NOT swap in Nimble-scraped reviews there,
+    // or the UI would label a Nimble batch with a report that doesn't
+    // match it. Only call Nimble when we're actually going to analyze
+    // those reviews with Claude. (Also saves a redundant Nimble request.)
+    const liveReviews = hasKey ? await fetchReviewsViaNimble(url) : null;
     const reviews = liveReviews ?? MOCK_REVIEWS;
     const reviewsSource: "nimble" | "mock" = liveReviews ? "nimble" : "mock";
 

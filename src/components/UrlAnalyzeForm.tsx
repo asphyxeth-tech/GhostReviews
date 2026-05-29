@@ -217,12 +217,17 @@ export function UrlAnalyzeForm() {
               // Reset state when the user edits the URL after either an
               // error OR a successful result — otherwise the stale report
               // hangs around while they're typing a new URL to scan.
-              if (showError || showResult) {
-                setErrorMessage("");
-                setResult(null);
-                setDirectPhase("idle");
-                setTowerPhase("idle");
-                setTower(null);
+              // Also abandon an in-flight Tower trigger/poll cleanly so a
+              // late callback can't overwrite state with stale data; we
+              // don't reset during a direct Claude submit because that
+              // single round-trip can't be canceled from the UI anyway.
+              if (
+                showError ||
+                showResult ||
+                towerPhase === "polling" ||
+                towerPhase === "triggering"
+              ) {
+                resetSharedState();
               }
             }}
             placeholder="Paste your Google Business Profile URL"

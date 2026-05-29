@@ -14,7 +14,7 @@ Reviews come from the **Nimble** API when `NIMBLE_API_KEY` is set in the environ
 
 | Mode | When | Behavior |
 | --- | --- | --- |
-| **live** | `ANTHROPIC_API_KEY` is set in the environment | Calls Claude Opus 4.7 with adaptive thinking + structured outputs + prompt caching |
+| **live** | `ANTHROPIC_API_KEY` is set in the environment | Calls Claude (Anthropic) with adaptive thinking + structured outputs + prompt caching |
 | **stub** | No `ANTHROPIC_API_KEY` set | Returns the canned `mock_report.json`. Lets the pipeline run end-to-end without burning tokens, useful for verifying Tower deploy/wiring. |
 
 ## Prerequisites

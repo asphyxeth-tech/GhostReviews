@@ -173,6 +173,10 @@ export function isTerminalStatus(status: TowerRunStatus): boolean {
  * We match on `startsWith` rather than `indexOf` so that this can never
  * be triggered by the literal substring appearing inside a Claude summary
  * or a URL embedded elsewhere in the logs.
+ *
+ * We iterate in reverse so that if Tower retried the run (and an earlier
+ * attempt emitted its own sentinel before the final success), the latest
+ * sentinel — the one matching the terminal run — wins.
  */
 export function extractResultFromLogs(
   logs: TowerLogLine[],
@@ -183,7 +187,8 @@ export function extractResultFromLogs(
   reviews_source?: "nimble" | "mock";
 } | null {
   const PREFIX = "__GHOST_RESULT__:";
-  for (const line of logs) {
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const line = logs[i];
     if (line.channel !== "program") continue;
     if (!line.content.startsWith(PREFIX)) continue;
     const jsonStr = line.content.slice(PREFIX.length).trim();

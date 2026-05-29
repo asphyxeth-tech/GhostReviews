@@ -92,7 +92,7 @@ For the Python pipeline, see [`pipeline/README.md`](./pipeline/README.md).
 
 ### How it actually runs
 
-The system is designed to degrade honestly rather than fail. With **no keys**, the demo flow runs against the bundled sample dataset and a canned report — useful for screenshots and stakeholder demos. With **just `NIMBLE_API_KEY`**, the app pulls live reviews but the analysis is still canned. With **both keys**, the app scrapes live reviews via Nimble and analyzes them with Claude. The UI labels each report with its actual data source ("Live reviews via Nimble" vs. "Demo dataset") so the operator and the viewer always know which path produced what they're seeing.
+The system is designed to degrade honestly rather than fail. With **no keys**, the demo flow runs against the bundled sample dataset and a canned report — useful for screenshots and stakeholder demos. With **just `NIMBLE_API_KEY`**, the app falls back to the canned demo (Nimble is only called when there's a Claude key to actually analyze the live batch). With **just `ANTHROPIC_API_KEY`**, the app runs live Claude analysis on the bundled sample dataset. With **both keys**, the app scrapes live reviews via Nimble and analyzes them with Claude. The UI labels each report with its actual data source ("Live reviews via Nimble" vs. "Demo dataset") so the operator and the viewer always know which path produced what they're seeing.
 
 ## Ethical use
 
