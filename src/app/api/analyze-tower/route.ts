@@ -19,6 +19,11 @@ import {
   triggerTowerRun,
 } from "@/lib/tower";
 
+// Vercel Hobby caps Node functions at 10s by default. Triggering a
+// Tower run is normally fast, but the upstream control-plane call can
+// occasionally take a few seconds. Bump to the Hobby max for headroom.
+export const maxDuration = 60;
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 

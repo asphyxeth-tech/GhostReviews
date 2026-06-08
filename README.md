@@ -47,18 +47,52 @@ Outputs are always framed as **likelihood + transparent reasoning**, never a def
     └── README.md             Full setup + deploy guide for the pipeline
 ```
 
-The web app (Next.js on Vercel) gives end users an instant report. The Tower pipeline runs the same Claude Opus 4.7 analysis as an orchestration-mode job — same prompt, same schema, same outputs. See [`pipeline/README.md`](./pipeline/README.md) for the Tower integration.
+The web app (Next.js on Vercel) gives end users an instant report. The Tower pipeline runs the same Claude analysis as an orchestration-mode job. The system prompt, analysis framework, and report schema are kept in lockstep between the TypeScript and Python implementations — the prompt text is identical, and the Zod schema in `src/lib/analysis-schema.ts` and the JSON Schema in `pipeline/task.py` encode the same shape in their respective formats. See [`pipeline/README.md`](./pipeline/README.md) for the Tower integration.
 
 ## Local setup
 
-> Setup steps will be filled in as the app is scaffolded. See `CLAUDE.md` for the working build plan.
+**Prerequisites:** Node 20+ for the web app, and Python 3.11+ if you also want to run the Tower pipeline locally.
 
-You will need API keys for:
-- Anthropic (Claude API)
-- Nimble
-- Tower
+```bash
+git clone https://github.com/asphyxeth-tech/DeveloperWeek2026Hackathon.git
+cd DeveloperWeek2026Hackathon
+npm install
+cp .env.example .env.local   # then open .env.local and fill in your keys
+npm run dev                  # serves at http://localhost:3000
+```
 
-Copy `.env.example` to `.env.local` and fill in your keys. **Never commit `.env*` files** — they're gitignored.
+Other useful scripts:
+
+- `npm run build` — production build (TypeScript + ESLint pass, generates static pages)
+- `npm run start` — run the production build locally (after `npm run build`)
+- `npm run lint` — run ESLint
+
+**Enable the secret-hygiene pre-commit hook (one-time per clone):**
+
+```bash
+git config core.hooksPath .githooks
+```
+
+See `SECURITY.md` for the full policy.
+
+### Which environment keys you need
+
+All keys are optional — the app gracefully degrades when one is missing.
+
+| Variable | Required? | Without it |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | Optional | The app runs in **demo mode**: the analysis step returns a canned report instead of calling Claude. No tokens are burned, and the rest of the flow (UI, validation, schema) is exercised end-to-end. |
+| `NIMBLE_API_KEY` | Optional | The app analyzes the bundled `pipeline/mock_reviews.json` sample dataset instead of scraping live Google reviews. |
+| `TOWER_API_KEY` | Optional | The "Deep scan via Tower" button errors out. The instant `/api/analyze` route still works. |
+| `TOWER_APP_NAME` | Optional | Defaults to `ghost-reviews` (matches the Towerfile). |
+
+**Never commit `.env*` files** — they're gitignored.
+
+For the Python pipeline, see [`pipeline/README.md`](./pipeline/README.md).
+
+### How it actually runs
+
+The system is designed to degrade honestly rather than fail. With **no keys**, the demo flow runs against the bundled sample dataset and a canned report — useful for screenshots and stakeholder demos. With **just `NIMBLE_API_KEY`**, the app falls back to the canned demo (Nimble is only called when there's a Claude key to actually analyze the live batch). With **just `ANTHROPIC_API_KEY`**, the app runs live Claude analysis on the bundled sample dataset. With **both keys**, the app scrapes live reviews via Nimble and analyzes them with Claude. The UI labels each report with its actual data source ("Live reviews via Nimble" vs. "Demo dataset") so the operator and the viewer always know which path produced what they're seeing.
 
 ## Ethical use
 

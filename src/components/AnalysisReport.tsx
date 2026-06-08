@@ -30,15 +30,17 @@ const RISK_BADGE: Record<string, { bg: string; text: string; label: string }> = 
 };
 
 export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
-  const { mode, business_url, generated_at, report } = data;
+  const { mode, business_url, generated_at, reviews_source, report } = data;
   const badge = RISK_BADGE[report.risk_level] ?? RISK_BADGE.medium;
+  const sourceLabel =
+    reviews_source === "nimble" ? "Live reviews via Nimble" : "Demo dataset";
 
   return (
     <div className="animate-fade-in-up text-left">
       {mode === "stub" && (
         <div className="mb-8 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-2)] px-4 py-3 text-sm text-[color:var(--muted-strong)]">
           <strong className="text-[color:var(--foreground)]">Demo mode.</strong>{" "}
-          The analysis pipeline is running on a static sample dataset because no{" "}
+          The Claude analysis step is returning a canned result because no{" "}
           <code className="font-mono text-xs">ANTHROPIC_API_KEY</code> is
           configured in this environment. The same code path runs against
           live Claude analysis when the key is present.
@@ -84,6 +86,16 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
           <span className="truncate">
             Source:{" "}
             <span className="text-[color:var(--foreground)]">{business_url}</span>
+          </span>
+          <span
+            className="inline-flex items-center rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-2 py-0.5 text-[10px] uppercase tracking-widest text-[color:var(--muted-strong)]"
+            title={
+              reviews_source === "nimble"
+                ? "Reviews scraped live via Nimble"
+                : "Reviews from the bundled sample dataset"
+            }
+          >
+            {sourceLabel}
           </span>
           <span>
             Generated: {new Date(generated_at).toLocaleString()}

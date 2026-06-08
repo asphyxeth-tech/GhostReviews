@@ -3,6 +3,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import {
   AnalysisReportSchema,
   type AnalysisReport,
+  type RatingSummary,
   type Review,
 } from "./analysis-schema";
 
@@ -57,13 +58,29 @@ You flag ONLY reviews that show genuine fraud signals. You do NOT flag every neg
 export async function analyzeReviewsWithClaude(
   businessUrl: string,
   reviews: Review[],
+  ratingSummary: RatingSummary | null = null,
 ): Promise<AnalysisReport> {
   const client = new Anthropic();
+
+  // When we have it (live Nimble scrapes), give Claude the real
+  // business-wide rating distribution as a baseline for signal #5
+  // (rating-distribution anomalies). Absent (mock mode / scrape miss),
+  // this is an empty string and behavior is unchanged.
+  const distributionContext = ratingSummary
+    ? `
+
+Business-wide rating distribution from Google (all-time baseline):
+- Overall: ${ratingSummary.overall_rating} stars across ${ratingSummary.review_count} total reviews
+- Star breakdown: ${[5, 4, 3, 2, 1]
+        .map((s) => `${s}-star: ${ratingSummary.ratings_count[String(s)] ?? 0}`)
+        .join(", ")}
+Use this as the baseline when judging whether the sampled reviews above represent a rating-distribution anomaly.`
+    : "";
 
   const userPrompt = `Analyze the following ${reviews.length} Google reviews for the business at: ${businessUrl}
 
 Recent review data (JSON):
-${JSON.stringify(reviews, null, 2)}
+${JSON.stringify(reviews, null, 2)}${distributionContext}
 
 Apply your analysis framework and return a structured report. Flag only reviews showing genuine policy-violation signals; do NOT flag legitimate negative reviews even if they are harsh.`;
 

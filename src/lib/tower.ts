@@ -168,16 +168,30 @@ export function isTerminalStatus(status: TowerRunStatus): boolean {
  * Walk the log lines looking for the sentinel emitted by pipeline/task.py
  * (`__GHOST_RESULT__:{...json...}` on a single line) and parse the embedded
  * AnalyzeResponse-shaped JSON. Returns null if no sentinel is present.
+ *
+ * The sentinel is always emitted at the start of its log line by task.py.
+ * We match on `startsWith` rather than `indexOf` so that this can never
+ * be triggered by the literal substring appearing inside a Claude summary
+ * or a URL embedded elsewhere in the logs.
+ *
+ * We iterate in reverse so that if Tower retried the run (and an earlier
+ * attempt emitted its own sentinel before the final success), the latest
+ * sentinel — the one matching the terminal run — wins.
  */
 export function extractResultFromLogs(
   logs: TowerLogLine[],
-): { mode: string; business_url: string; report: AnalysisReport } | null {
+): {
+  mode: string;
+  business_url: string;
+  report: AnalysisReport;
+  reviews_source?: "nimble" | "mock";
+} | null {
   const PREFIX = "__GHOST_RESULT__:";
-  for (const line of logs) {
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const line = logs[i];
     if (line.channel !== "program") continue;
-    const idx = line.content.indexOf(PREFIX);
-    if (idx === -1) continue;
-    const jsonStr = line.content.slice(idx + PREFIX.length).trim();
+    if (!line.content.startsWith(PREFIX)) continue;
+    const jsonStr = line.content.slice(PREFIX.length).trim();
     try {
       return JSON.parse(jsonStr);
     } catch {

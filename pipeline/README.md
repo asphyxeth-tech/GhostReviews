@@ -2,19 +2,19 @@
 
 A [Tower](https://tower.dev) app that runs the ghost.reviews scrape → analyze pipeline as a serverless Python job.
 
-This is the **batch / pipeline-mode** version of what the Next.js [`/api/analyze`](../src/app/api/analyze/route.ts) route does interactively. Same Claude Opus 4.7 model, same system prompt, same fraud-signal taxonomy, same output schema. The web app gives an end user an instant report; this pipeline is the runtime built for orchestration (scheduled scans, bulk runs across many businesses, CI-style fraud monitoring).
+This is the **batch / pipeline-mode** version of what the Next.js [`/api/analyze`](../src/app/api/analyze/route.ts) route does interactively. Same Claude model, same system prompt, same fraud-signal taxonomy, and a matching output schema (Zod on the TS side, JSON Schema here). The web app gives an end user an instant report; this pipeline is the runtime built for orchestration (scheduled scans, bulk runs across many businesses, CI-style fraud monitoring).
 
 ## What it does
 
 Takes a Google Business Profile URL as a parameter, loads recent public reviews, analyzes them for coordinated-attack signals using Claude, and prints the structured authenticity report to stdout as JSON.
 
-For now reviews come from a static `mock_reviews.json` (same dataset as the web app). The next iteration replaces this with a live scrape via the **Nimble** API.
+Reviews come from the **Nimble** API when `NIMBLE_API_KEY` is set in the environment. Without that key the pipeline falls back to the bundled `mock_reviews.json` sample dataset so it can still run end-to-end for development and verification.
 
 ## Modes
 
 | Mode | When | Behavior |
 | --- | --- | --- |
-| **live** | `ANTHROPIC_API_KEY` is set in the environment | Calls Claude Opus 4.7 with adaptive thinking + structured outputs + prompt caching |
+| **live** | `ANTHROPIC_API_KEY` is set in the environment | Calls Claude (Anthropic) with adaptive thinking + structured outputs + prompt caching |
 | **stub** | No `ANTHROPIC_API_KEY` set | Returns the canned `mock_report.json`. Lets the pipeline run end-to-end without burning tokens, useful for verifying Tower deploy/wiring. |
 
 ## Prerequisites
@@ -73,12 +73,12 @@ tower apps logs ghost-reviews
 | `task.py` | The pipeline entrypoint Tower runs |
 | `Towerfile` | Tower app manifest: name, entrypoint, source files, parameters |
 | `requirements.txt` | Python deps (just `anthropic`) |
-| `mock_reviews.json` | Sample review dataset — placeholder for live Nimble-scraped data |
+| `mock_reviews.json` | Sample review dataset used when `NIMBLE_API_KEY` is unset (shared with the web app) |
 | `mock_report.json` | Canned analysis result used in stub mode |
 
 ## Parity with the web app
 
-The Python `SYSTEM_PROMPT` and `ANALYSIS_REPORT_SCHEMA` mirror the TypeScript versions in [`src/lib/anthropic.ts`](../src/lib/anthropic.ts) and [`src/lib/analysis-schema.ts`](../src/lib/analysis-schema.ts) byte-for-byte. If you modify the analysis behavior, update both — there's no shared source of truth yet (intentional: keeping the surfaces decoupled for the MVP).
+The system prompt, analysis framework, and report schema are kept in lockstep between this Python pipeline and the Next.js app. The prompt text in `SYSTEM_PROMPT` here matches the one in [`src/lib/anthropic.ts`](../src/lib/anthropic.ts), and the JSON Schema in `ANALYSIS_REPORT_SCHEMA` encodes the same shape as the Zod schema in [`src/lib/analysis-schema.ts`](../src/lib/analysis-schema.ts) — Zod and JSON Schema in their respective formats. If you modify the analysis behavior, update both — there's no shared source of truth yet (intentional: keeping the surfaces decoupled for the MVP). The bundled `mock_reviews.json` and `mock_report.json` ARE shared — the Next.js app imports them directly via [`src/lib/mock-data.ts`](../src/lib/mock-data.ts).
 
 ## Web app integration
 
@@ -96,6 +96,6 @@ The integration requires the following env vars on the Next.js side (set in Verc
 
 ## Roadmap
 
-- [ ] Replace `mock_reviews.json` with a live scrape step using the Nimble API
+- [x] Replace `mock_reviews.json` with a live scrape step using the Nimble API (now gated on `NIMBLE_API_KEY`)
 - [ ] Add a scheduled-run example (`tower schedules create ...`) for periodic monitoring
 - [x] Wire the Next.js API route to invoke this Tower app for "deep scan" requests
