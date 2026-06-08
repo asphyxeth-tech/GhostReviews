@@ -10,6 +10,16 @@ export const ReviewSchema = z.object({
 });
 export type Review = z.infer<typeof ReviewSchema>;
 
+// Business-wide star-rating distribution, scraped from the Google Maps
+// place result. Not part of the API response payload — it's passed to
+// Claude as a real baseline for judging rating-distribution anomalies.
+export const RatingSummarySchema = z.object({
+  overall_rating: z.number(),
+  review_count: z.number().int(),
+  ratings_count: z.record(z.string(), z.number().int()),
+});
+export type RatingSummary = z.infer<typeof RatingSummarySchema>;
+
 export const FlaggedReviewSchema = z.object({
   review_id: z.string(),
   reviewer_name: z.string(),
