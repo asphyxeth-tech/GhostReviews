@@ -714,6 +714,7 @@ def main() -> int:
         "mode": mode,
         "business_url": business_url,
         "reviews_source": reviews_source,
+        "reviews_total": rating_summary.get("review_count") if rating_summary else None,
         "report": report,
     }
 

@@ -30,7 +30,8 @@ const RISK_BADGE: Record<string, { bg: string; text: string; label: string }> = 
 };
 
 export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
-  const { mode, business_url, generated_at, reviews_source, report } = data;
+  const { mode, business_url, generated_at, reviews_source, reviews_total, report } =
+    data;
   const badge = RISK_BADGE[report.risk_level] ?? RISK_BADGE.medium;
   const sourceLabel =
     reviews_source === "nimble" ? "Live reviews via Nimble" : "Demo dataset";
@@ -102,6 +103,41 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
           </span>
         </div>
       </div>
+
+      {reviews_source === "nimble" && (
+        <div className="mt-6 rounded-2xl border border-[color:var(--accent)]/30 bg-[color:var(--accent)]/[0.06] p-6 sm:p-7">
+          <h3 className="text-base font-semibold text-[color:var(--foreground)]">
+            This is a free preview
+            {typeof reviews_total === "number" &&
+            reviews_total > report.total_reviews_analyzed
+              ? ` — we scanned your ${report.total_reviews_analyzed} most recent reviews of ${reviews_total.toLocaleString()} total.`
+              : ` — we scanned your ${report.total_reviews_analyzed} most recent reviews.`}
+          </h3>
+          <p className="mt-3 text-sm leading-relaxed text-[color:var(--muted-strong)]">
+            Reputation protection is ongoing work. With{" "}
+            <span className="font-medium text-[color:var(--foreground)]">
+              ghost.reviews
+            </span>{" "}
+            you get a{" "}
+            <strong className="font-medium text-[color:var(--foreground)]">
+              complete audit of every review
+            </strong>{" "}
+            your business has ever received — a full evidence report you can act
+            on — plus{" "}
+            <strong className="font-medium text-[color:var(--foreground)]">
+              always-on monitoring
+            </strong>{" "}
+            that scans new reviews as they arrive and alerts you the moment a
+            coordinated attack appears.
+          </p>
+          <a
+            href="mailto:onlinedevon88@gmail.com?subject=ghost.reviews%20%E2%80%94%20full%20audit%20%2B%20monitoring&body=I%27d%20like%20the%20complete%20audit%20and%20ongoing%20protection%20for%20my%20business.%20Here%27s%20my%20Google%20Business%20Profile%3A%20"
+            className="mt-5 inline-flex items-center gap-2 rounded-lg bg-[color:var(--accent)] px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-[color:var(--accent-glow)]"
+          >
+            Get the full audit + ongoing protection →
+          </a>
+        </div>
+      )}
 
       <div className="mt-10">
         <h3 className="font-mono text-xs uppercase tracking-[0.18em] text-[color:var(--accent)]">
