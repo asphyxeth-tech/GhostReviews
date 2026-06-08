@@ -59,6 +59,7 @@ export async function analyzeReviewsWithClaude(
   businessUrl: string,
   reviews: Review[],
   ratingSummary: RatingSummary | null = null,
+  effort: "low" | "medium" | "high" = "high",
 ): Promise<AnalysisReport> {
   const client = new Anthropic();
 
@@ -89,7 +90,7 @@ Apply your analysis framework and return a structured report. Flag only reviews 
     max_tokens: 16000,
     thinking: { type: "adaptive" },
     output_config: {
-      effort: "high",
+      effort,
       format: zodOutputFormat(AnalysisReportSchema),
     },
     system: [

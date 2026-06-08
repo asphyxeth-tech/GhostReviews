@@ -50,6 +50,10 @@ export const AnalyzeResponseSchema = z.object({
   // Zod .parse() strips unknown keys, so this field must live on the
   // schema or it disappears from the response payload.
   reviews_source: z.enum(["nimble", "mock"]),
+  // The business's all-time review count from Google (e.g. 10342) when a
+  // live scrape captured it — powers the "previewed N of M total" upsell.
+  // Optional so payloads without it (e.g. older Tower runs) still validate.
+  reviews_total: z.number().int().nullable().optional(),
   report: AnalysisReportSchema,
 });
 export type AnalyzeResponse = z.infer<typeof AnalyzeResponseSchema>;

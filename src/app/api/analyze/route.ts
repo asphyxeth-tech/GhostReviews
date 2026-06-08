@@ -13,10 +13,14 @@ export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// The instant web scan pulls the most-recent reviews — enough to catch a
-// live review-bombing burst while staying within the 60s function budget.
-// The Tower pipeline does the deep "assess hundreds" initial scan.
-const WEB_MAX_REVIEWS = 40;
+// The instant web scan pulls the most-recent reviews — a free "preview"
+// that catches a live review-bombing burst while staying within Vercel's
+// 60s function budget. Scraping 100 takes ~16s; we run the analysis at
+// medium effort (vs. the Tower deep scan's high effort) so the whole
+// round-trip lands comfortably under 60s. The Tower pipeline does the
+// deep "audit hundreds" initial scan + ongoing incremental re-scans.
+const WEB_MAX_REVIEWS = 100;
+const WEB_ANALYSIS_EFFORT = "medium" as const;
 
 const RequestSchema = z.object({
   url: z.string().url(),
@@ -44,6 +48,7 @@ export async function POST(req: NextRequest) {
           url,
           reviews,
           haveLive ? scrape!.rating_summary : null,
+          WEB_ANALYSIS_EFFORT,
         )
       : MOCK_REPORT;
 
@@ -52,6 +57,9 @@ export async function POST(req: NextRequest) {
       business_url: url,
       generated_at: new Date().toISOString(),
       reviews_source: reviewsSource,
+      // The business's all-time review count (for the "N of M total"
+      // preview framing); null in mock mode or if the scrape lacked it.
+      reviews_total: haveLive ? (scrape!.rating_summary?.review_count ?? null) : null,
       report,
     };
 
