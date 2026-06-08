@@ -12,3 +12,13 @@ source = [
 name = "business_url"
 description = "Google Business Profile URL whose reviews should be scraped and analyzed."
 default = "https://maps.app.goo.gl/example-business"
+
+[[parameters]]
+name = "max_reviews"
+description = "How many reviews to scan, newest-first. The initial onboarding scan wants hundreds; ongoing incremental scans can use a smaller number."
+default = "200"
+
+[[parameters]]
+name = "since"
+description = "Optional ISO date (e.g. 2026-06-01). When set, only reviews newer than this are scanned — the incremental 'only what's new since last scan' mode."
+default = ""
