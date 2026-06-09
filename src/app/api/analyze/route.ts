@@ -15,13 +15,14 @@ export const runtime = "nodejs";
 
 // The instant web scan is a free "preview": the most-recent reviews,
 // analyzed at medium effort. Vercel's Hobby tier hard-caps functions at
-// 60s — and 100 reviews blew past it (~62s -> 504). Review COUNT drives
-// Claude's analysis time more than effort does (~40 reviews ≈ 25s of
-// analysis, ~100 ≈ 46s), so we cap the instant preview at 50, which lands
-// reliably under 60s with margin (scrape ~9s + analysis ~28s). The Tower
-// pipeline does the deep "audit hundreds → all" scan with no time limit —
-// that's the paid tier (and the "Deep scan via Tower" button).
-const WEB_MAX_REVIEWS = 50;
+// 60s. Live timings observed:
+//   - 100 reviews -> 62s -> HTTP 504 (failed)
+//   - 50 reviews  -> 60.5s -> 200 by 0.5s (unsafe margin)
+//   - 40 reviews  -> ~33s -> 200 (safe)
+// Cap at 40 to leave a safe margin for normal Claude latency variance.
+// The Tower pipeline does the deep "audit hundreds → all" scan with no
+// time limit — that's the paid tier (and the "Deep scan via Tower" button).
+const WEB_MAX_REVIEWS = 40;
 const WEB_ANALYSIS_EFFORT = "medium" as const;
 
 const RequestSchema = z.object({
