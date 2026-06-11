@@ -96,10 +96,8 @@ export default async function Image() {
             fontFamily: "ui-monospace, monospace",
           }}
         >
-          <div>Built for DeveloperWeek New York 2026</div>
-          <div style={{ color: "#a78bfa" }}>
-            Nimble · Tower · Anthropic · Next.js · Vercel
-          </div>
+          <div>Independent fraud-signal analysis for local businesses</div>
+          <div style={{ color: "#a78bfa" }}>ghost.reviews</div>
         </div>
       </div>
     ),

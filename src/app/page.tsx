@@ -44,7 +44,7 @@ const STEPS = [
     n: "02",
     title: "We scan and analyze",
     body:
-      "Recent public reviews are scraped via Nimble, then analyzed for fraud signals by Claude on the Tower pipeline.",
+      "We pull your recent public reviews and run them through a six-signal forensic analysis for evidence of coordinated, policy-violating activity.",
   },
   {
     n: "03",
@@ -52,15 +52,6 @@ const STEPS = [
     body:
       "An authenticity report with an overall risk score, every flagged review explained in plain English, and a drafted policy-violation request you can copy and submit to Google.",
   },
-];
-
-const STACK = [
-  "Nimble",
-  "Tower",
-  "Claude (Anthropic)",
-  "Next.js",
-  "Vercel",
-  "name.com",
 ];
 
 export default function Home() {
@@ -76,12 +67,10 @@ export default function Home() {
             <span>ghost.reviews</span>
           </div>
           <a
-            href="https://github.com/asphyxeth-tech/DeveloperWeek2026Hackathon"
-            target="_blank"
-            rel="noopener noreferrer"
+            href="mailto:onlinedevon88@gmail.com?subject=ghost.reviews"
             className="text-sm text-[color:var(--muted)] transition hover:text-[color:var(--foreground)]"
           >
-            View on GitHub →
+            Contact →
           </a>
         </div>
       </header>
@@ -211,25 +200,15 @@ export default function Home() {
                 ghost.reviews
               </div>
               <div className="mt-1 text-xs text-[color:var(--muted)]">
-                Built for the DeveloperWeek New York 2026 Hackathon.
+                Independent fraud-signal analysis for local businesses.
               </div>
             </div>
             <a
-              href="https://github.com/asphyxeth-tech/DeveloperWeek2026Hackathon"
-              target="_blank"
-              rel="noopener noreferrer"
+              href="mailto:onlinedevon88@gmail.com?subject=ghost.reviews"
               className="text-xs text-[color:var(--muted)] transition hover:text-[color:var(--foreground)]"
             >
-              github.com/asphyxeth-tech/DeveloperWeek2026Hackathon →
+              Get in touch →
             </a>
-          </div>
-          <div className="mt-8 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[color:var(--muted)]">
-            <span>Built with:</span>
-            {STACK.map((name) => (
-              <span key={name} className="text-[color:var(--foreground)]">
-                {name}
-              </span>
-            ))}
           </div>
         </div>
       </footer>
