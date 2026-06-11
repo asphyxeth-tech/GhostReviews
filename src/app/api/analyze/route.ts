@@ -4,6 +4,7 @@ import { analyzeReviewsWithClaude } from "@/lib/anthropic";
 import { scrapeBusinessReviews } from "@/lib/nimble";
 import { MOCK_REVIEWS, MOCK_REPORT } from "@/lib/mock-data";
 import { AnalyzeResponseSchema, type AnalyzeResponse } from "@/lib/analysis-schema";
+import { saveScanIfAuthenticated } from "@/lib/scan-store";
 
 // With Fluid Compute (default on newer Vercel projects), Hobby allows up to
 // 300s maxDuration — the old 60s value was a self-imposed ceiling that caused
@@ -68,7 +69,13 @@ export async function POST(req: NextRequest) {
       report,
     };
 
-    return NextResponse.json(AnalyzeResponseSchema.parse(response));
+    const validated = AnalyzeResponseSchema.parse(response);
+
+    // Signed-in users get the scan saved to their dashboard history.
+    // Anonymous scans (and unconfigured environments) skip this silently.
+    await saveScanIfAuthenticated(validated);
+
+    return NextResponse.json(validated);
   } catch (err) {
     if (err instanceof z.ZodError) {
       return NextResponse.json(

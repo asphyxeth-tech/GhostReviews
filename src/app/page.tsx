@@ -66,12 +66,20 @@ export default function Home() {
             />
             <span>ghost.reviews</span>
           </div>
-          <a
-            href="mailto:onlinedevon88@gmail.com?subject=ghost.reviews"
-            className="text-sm text-[color:var(--muted)] transition hover:text-[color:var(--foreground)]"
-          >
-            Contact →
-          </a>
+          <div className="flex items-center gap-5">
+            <a
+              href="/login"
+              className="text-sm text-[color:var(--muted)] transition hover:text-[color:var(--foreground)]"
+            >
+              Sign in
+            </a>
+            <a
+              href="mailto:onlinedevon88@gmail.com?subject=ghost.reviews"
+              className="text-sm text-[color:var(--muted)] transition hover:text-[color:var(--foreground)]"
+            >
+              Contact →
+            </a>
+          </div>
         </div>
       </header>
 

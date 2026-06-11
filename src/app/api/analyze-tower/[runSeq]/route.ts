@@ -20,6 +20,7 @@ import {
   isTerminalStatus,
 } from "@/lib/tower";
 import { AnalyzeResponseSchema } from "@/lib/analysis-schema";
+import { saveScanIfAuthenticated } from "@/lib/scan-store";
 
 // Vercel Hobby caps Node functions at 10s by default. The poll itself
 // is fast, but fetching Tower logs once the run is terminal can take a
@@ -131,6 +132,10 @@ export async function GET(
         { status: 502 },
       );
     }
+
+    // Signed-in users get the completed deep audit saved to their
+    // dashboard. The tower_run_seq dedupes re-polls of a finished run.
+    await saveScanIfAuthenticated(validation.data, { towerRunSeq: run.number });
 
     return NextResponse.json(payload);
   } catch (err) {

@@ -93,6 +93,14 @@ Tower pipeline (Python, lives in `pipeline/`):
 - Without Tower CLI: `BUSINESS_URL=<URL> python3 pipeline/task.py`
 - See `pipeline/README.md` for the full integration guide and parity notes with the web app.
 
+Supabase (accounts + scan history):
+
+- Env vars: `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` (both or neither; app degrades gracefully without them)
+- Schema lives in `supabase/migrations/` — apply via the Supabase SQL Editor (setup steps in README)
+- Magic-link auth: `/login` → email link → `/auth/callback` → `/dashboard`
+- Scans run while signed in are auto-saved (`src/lib/scan-store.ts`, hooked into both `/api/analyze` and the Tower poll route); anonymous scans are never persisted
+- Row Level Security: customers can only read/insert their own `scans` rows
+
 Web app -> Tower integration:
 
 - `POST /api/analyze-tower` — triggers a deployed Tower run for the given URL, returns `run_seq` immediately
@@ -104,7 +112,7 @@ Web app -> Tower integration:
 ## Roadmap (priority order)
 
 1. **Depth**: wire `max_reviews` from the UI through `/api/analyze-tower` to the pipeline (Towerfile + task.py already support it)
-2. **Persistence + auth**: Supabase; save scan history per business
+2. **Persistence + auth**: ✅ first cut shipped (Supabase magic-link login, auto-saved scan history, `/dashboard`); next: per-business grouping + rating timeline
 3. **DFY workflow**: filing tracker (drafted → submitted → outcome), GBP-manager onboarding flow with written-consent checkbox + one-click disassociation
 4. **Scheduling**: monthly auto-scans + diff alerts; Stripe billing
 5. **Lead gen**: rating-dip detector for outbound prospecting

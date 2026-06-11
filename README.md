@@ -82,10 +82,35 @@ All keys are optional — the app gracefully degrades when one is missing.
 | `NIMBLE_API_KEY` | Optional | The app analyzes the bundled `pipeline/mock_reviews.json` sample dataset instead of scraping live Google reviews. |
 | `TOWER_API_KEY` | Optional | The "Deep scan via Tower" button errors out. The instant `/api/analyze` route still works. |
 | `TOWER_APP_NAME` | Optional | Defaults to `ghost-reviews` (matches the Towerfile). |
+| `NEXT_PUBLIC_SUPABASE_URL` | Optional | Sign-in and the scan-history dashboard are disabled; anonymous scans work as always. |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Optional | Same as above — both Supabase vars must be present together. |
 
 **Never commit `.env*` files** — they're gitignored.
 
 For the Python pipeline, see [`pipeline/README.md`](./pipeline/README.md).
+
+### Supabase setup (accounts + scan history)
+
+Customer accounts (magic-link email sign-in) and the scan-history dashboard
+are powered by Supabase. One-time setup:
+
+1. Create a project at [supabase.com](https://supabase.com) (free tier is fine).
+2. Open **SQL Editor → New query**, paste the contents of
+   [`supabase/migrations/0001_scans.sql`](./supabase/migrations/0001_scans.sql), and **Run**.
+3. In **Authentication → URL Configuration**, set the Site URL to
+   `https://ghostreviews.app` and add these Redirect URLs:
+   - `https://ghostreviews.app/auth/callback`
+   - `http://localhost:3000/auth/callback`
+4. In **Project Settings → API**, copy the **Project URL** and the
+   **anon/public key** into the env vars (`.env.local` locally, and
+   Project → Settings → Environment Variables on Vercel):
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+5. Redeploy. Sign-in appears in the site header; scans run while signed
+   in are saved to `/dashboard` automatically.
+
+Without these vars the app behaves exactly as before — anonymous scans,
+nothing persisted.
 
 ### How it actually runs
 
