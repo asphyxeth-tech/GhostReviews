@@ -4,9 +4,7 @@
 
 ghost.reviews is a B2B web app that helps local business owners detect coordinated, fraudulent review attacks ("review bombing") on their **Google Business Profile**, produces a transparent evidence report, and drafts an official **policy-violation removal request** they can submit to Google.
 
-Built for the [DeveloperWeek New York 2026 Hackathon](https://dwny-2026-hackathon.devpost.com/). Submission deadline: **June 10, 2026, 10:00 AM ET**.
-
-> **Live demo:** https://ghost-reviews-ten.vercel.app/
+> **Live:** https://ghost-reviews-ten.vercel.app/
 
 ---
 
@@ -24,12 +22,11 @@ Fake and planted reviews are now federally illegal in the U.S. under the FTC's C
 
 Outputs are always framed as **likelihood + transparent reasoning**, never a definitive "this is fake" verdict. We don't delete reviews. We don't automate mass-flagging. We don't help bury honest negative criticism — suppressing legitimate reviews is itself an FTC violation and is firmly out of scope.
 
-## Built with
+## Tech stack
 
-- **[Nimble](https://nimbleway.com/)** — live Google review scraping via Search / Extract / Crawl / Web APIs
-- **[Tower](https://tower.dev/)** — Pythonic serverless compute for the scrape → analyze pipeline
-- **[name.com](https://name.com/)** — the domain is the conceptual heart of the project
 - **[Claude API](https://www.anthropic.com/)** (Anthropic) — fraud-signal analysis and removal-request drafting
+- **[Nimble](https://nimbleway.com/)** — live Google review scraping
+- **[Tower](https://tower.dev/)** — serverless Python compute for the deep-audit pipeline
 - **[Next.js](https://nextjs.org/)** (App Router) + **[Tailwind CSS](https://tailwindcss.com/)** — frontend
 - **[Vercel](https://vercel.com/)** — hosting
 

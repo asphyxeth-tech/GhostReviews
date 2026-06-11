@@ -22,7 +22,10 @@ type TowerProgress = {
 };
 
 const POLL_INTERVAL_MS = 2500;
-const MAX_POLL_MS = 90_000;
+// The full audit analyzes ~200 reviews at high effort with no server-side
+// time limit — runs can legitimately take several minutes. Each poll is its
+// own cheap request, so a generous client-side window costs nothing.
+const MAX_POLL_MS = 300_000;
 
 const URL_RE = /^https?:\/\/.+/i;
 
@@ -140,8 +143,8 @@ export function UrlAnalyzeForm() {
             if (pollTimer.current) clearInterval(pollTimer.current);
             setTowerPhase("error");
             setErrorMessage(
-              `Tower run is taking longer than ${Math.round(MAX_POLL_MS / 1000)}s. ` +
-                `Check the run at https://app.tower.dev/ — it may still complete.`,
+              `The full audit is taking longer than ${Math.round(MAX_POLL_MS / 1000 / 60)} minutes. ` +
+                `It may still complete in the background — try the scan again in a few minutes.`,
             );
             return;
           }
@@ -256,14 +259,14 @@ export function UrlAnalyzeForm() {
             onClick={handleTowerSubmit}
             disabled={isBusy}
             className="rounded-md border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-1.5 text-xs font-medium text-[color:var(--muted-strong)] transition hover:border-[color:var(--accent)]/50 hover:text-[color:var(--foreground)] disabled:cursor-not-allowed disabled:opacity-60"
-            title="Run the analysis through the Tower serverless pipeline instead of calling Claude directly."
+            title="A deeper scan that audits hundreds of your most recent reviews. Takes a few minutes."
           >
             {towerPhase === "triggering" ? (
-              <span className="animate-accent-pulse">Triggering Tower…</span>
+              <span className="animate-accent-pulse">Starting full audit…</span>
             ) : towerPhase === "polling" ? (
-              <span className="animate-accent-pulse">Tower: {tower?.status ?? "running"}…</span>
+              <span className="animate-accent-pulse">Audit: {tower?.status ?? "running"}…</span>
             ) : (
-              "Deep scan via Tower"
+              "Full audit — hundreds of reviews"
             )}
           </button>
         </div>
@@ -274,12 +277,11 @@ export function UrlAnalyzeForm() {
             className="mt-5 rounded-lg border border-[color:var(--accent)]/30 bg-[color:var(--accent)]/10 px-4 py-3 text-sm text-[color:var(--muted-strong)]"
           >
             <strong className="text-[color:var(--foreground)]">
-              Tower run #{tower.runSeq} in flight
+              Full audit in progress
             </strong>{" "}
-            on <code className="font-mono">{tower.appName}</code> · status:{" "}
-            <code className="font-mono">{tower.status}</code> ·{" "}
-            {(tower.elapsedMs / 1000).toFixed(1)}s elapsed. Polling every{" "}
-            {POLL_INTERVAL_MS / 1000}s.
+            · status: <code className="font-mono">{tower.status}</code> ·{" "}
+            {(tower.elapsedMs / 1000).toFixed(0)}s elapsed. Deep scans analyze
+            hundreds of reviews and can take a few minutes.
           </div>
         )}
 

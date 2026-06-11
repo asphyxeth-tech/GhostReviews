@@ -34,7 +34,7 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
     data;
   const badge = RISK_BADGE[report.risk_level] ?? RISK_BADGE.medium;
   const sourceLabel =
-    reviews_source === "nimble" ? "Live reviews via Nimble" : "Demo dataset";
+    reviews_source === "nimble" ? "Live Google data" : "Demo dataset";
 
   return (
     <div className="animate-fade-in-up text-left">
@@ -92,7 +92,7 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
             className="inline-flex items-center rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-2 py-0.5 text-[10px] uppercase tracking-widest text-[color:var(--muted-strong)]"
             title={
               reviews_source === "nimble"
-                ? "Reviews scraped live via Nimble"
+                ? "Reviews pulled live from your public Google profile"
                 : "Reviews from the bundled sample dataset"
             }
           >

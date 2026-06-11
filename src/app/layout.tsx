@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     "review bombing",
     "Google reviews",
     "FTC Consumer Review Rule",
-    "DeveloperWeek 2026",
+    "reputation management",
   ],
   openGraph: {
     title: "ghost.reviews — See the ghosts in your reviews",

@@ -5,10 +5,12 @@ import { scrapeBusinessReviews } from "@/lib/nimble";
 import { MOCK_REVIEWS, MOCK_REPORT } from "@/lib/mock-data";
 import { AnalyzeResponseSchema, type AnalyzeResponse } from "@/lib/analysis-schema";
 
-// Vercel Hobby tier caps Node functions at 10 seconds by default.
-// Nimble (place lookup + a few paginated review pages) + Claude in series
-// can exceed that, so bump the cap. (Vercel max for Hobby is 60s.)
-export const maxDuration = 60;
+// With Fluid Compute (default on newer Vercel projects), Hobby allows up to
+// 300s maxDuration — the old 60s value was a self-imposed ceiling that caused
+// intermittent 504s whenever the upstream scrape ran slow. The PR preview
+// deploy validates the plan actually accepts this; if the build rejects it,
+// drop back to 60.
+export const maxDuration = 300;
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
