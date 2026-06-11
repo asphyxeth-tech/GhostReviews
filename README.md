@@ -51,8 +51,8 @@ The web app (Next.js on Vercel) gives end users an instant report. The Tower pip
 **Prerequisites:** Node 20+ for the web app, and Python 3.11+ if you also want to run the Tower pipeline locally.
 
 ```bash
-git clone https://github.com/asphyxeth-tech/DeveloperWeek2026Hackathon.git
-cd DeveloperWeek2026Hackathon
+git clone https://github.com/asphyxeth-tech/GhostReviews.git
+cd GhostReviews
 npm install
 cp .env.example .env.local   # then open .env.local and fill in your keys
 npm run dev                  # serves at http://localhost:3000
@@ -80,7 +80,7 @@ All keys are optional — the app gracefully degrades when one is missing.
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | Optional | The app runs in **demo mode**: the analysis step returns a canned report instead of calling Claude. No tokens are burned, and the rest of the flow (UI, validation, schema) is exercised end-to-end. |
 | `NIMBLE_API_KEY` | Optional | The app analyzes the bundled `pipeline/mock_reviews.json` sample dataset instead of scraping live Google reviews. |
-| `TOWER_API_KEY` | Optional | The "Deep scan via Tower" button errors out. The instant `/api/analyze` route still works. |
+| `TOWER_API_KEY` | Optional | The "Full audit" button errors out. The instant `/api/analyze` route still works. |
 | `TOWER_APP_NAME` | Optional | Defaults to `ghost-reviews` (matches the Towerfile). |
 | `NEXT_PUBLIC_SUPABASE_URL` | Optional | Sign-in and the scan-history dashboard are disabled; anonymous scans work as always. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Optional | Same as above — both Supabase vars must be present together. |
@@ -114,7 +114,7 @@ nothing persisted.
 
 ### How it actually runs
 
-The system is designed to degrade honestly rather than fail. With **no keys**, the demo flow runs against the bundled sample dataset and a canned report — useful for screenshots and stakeholder demos. With **just `NIMBLE_API_KEY`**, the app falls back to the canned demo (Nimble is only called when there's a Claude key to actually analyze the live batch). With **just `ANTHROPIC_API_KEY`**, the app runs live Claude analysis on the bundled sample dataset. With **both keys**, the app scrapes live reviews via Nimble and analyzes them with Claude. The UI labels each report with its actual data source ("Live reviews via Nimble" vs. "Demo dataset") so the operator and the viewer always know which path produced what they're seeing.
+The system is designed to degrade honestly rather than fail. With **no keys**, the demo flow runs against the bundled sample dataset and a canned report — useful for screenshots and stakeholder demos. With **just `NIMBLE_API_KEY`**, the app falls back to the canned demo (Nimble is only called when there's a Claude key to actually analyze the live batch). With **just `ANTHROPIC_API_KEY`**, the app runs live Claude analysis on the bundled sample dataset. With **both keys**, the app scrapes live reviews via Nimble and analyzes them with Claude. The UI labels each report with its actual data source ("Live Google data" vs. "Demo dataset") so the operator and the viewer always know which path produced what they're seeing.
 
 ## Ethical use
 
