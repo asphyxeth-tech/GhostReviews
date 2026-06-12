@@ -109,7 +109,99 @@ Web app -> Tower integration:
 - Server-side env vars needed: `TOWER_API_KEY` (sk-...) and `TOWER_APP_NAME` (defaults to `ghost-reviews`)
 - `pipeline/task.py` emits a `__GHOST_RESULT__:{...}` sentinel line so the TS side can extract the structured report from Tower's stdout logs deterministically
 
-## Roadmap (priority order)
+## Outreach engine — lessons from live testing (read before tuning prospect.py)
+
+We ran two live prospect scans of London ON across 7-8 verticals (~73
+businesses, 4,800 Nimble trial credits → only ~400 spent across the
+whole experiment, so credits are NOT the constraint at this scale).
+What follows is what we proved — assume any future "let's just bump the
+threshold" idea has to survive these realities first.
+
+**The fundamental truth.** The cheap heuristic in `pipeline/prospect.py`
+CANNOT reliably tell a coordinated attack from organic noise. Only
+reading the review *content* (the Claude analysis on the site) can.
+That's by design and it's fine — the pre-filter's job is to NARROW (73
+→ 6 for pennies), and Claude's job is to VERIFY (cents per business).
+Never try to make the pre-filter into the verifier. The two-stage funnel
+is the product.
+
+**False-positive modes we hit, and what they actually look like.** A
+"burst" — 3+ negative reviews in a 14-day window — is the engine's
+strongest signal, and it triggers in at least four ways that are NOT
+attacks. Any future scoring change must keep filtering these out:
+
+1. **Event-driven complaint clusters.** A restaurant on Mother's Day, a
+   service business after a bad batch, a hair salon after a stylist
+   leaves. peppermoon (London, 4.7★, 864 reviews) scored #1 in our v2
+   run on a textbook burst — Claude verification: risk 20, zero flagged,
+   the negatives were specific complaints about a busy holiday weekend.
+   These are real customer experiences, not attacks. Suppressing them
+   would BE an FTC violation under § 465.7.
+
+2. **Volume artifacts on high-traffic businesses.** Reliance HVAC has
+   ~13,000 lifetime reviews. 3 negatives in any 14 days at that volume
+   is statistically guaranteed background noise, not a signal. The fix
+   we identified but haven't shipped: make burst velocity-aware —
+   normalize "negatives per 14 days" by the business's overall review
+   rate before scoring it. (~15 min change.)
+
+3. **Lone low-history reviewers.** In v1 we gave 25 points to "recent
+   negatives mostly from accounts with <=2 lifetime reviews" on its
+   OWN. That produced false positives at peppermoon and Two Small Men
+   Moving (both clean under Claude). Lone throwaway-account reviewers
+   are just life; they only matter as CORROBORATION when an attack
+   anchor (burst/spike) is already firing. The v2 scoring (burst/spike
+   as required anchors, throwaway as +20 corroboration only) reflects
+   this and works — keep it.
+
+4. **Chronically low ratings.** Law firms structurally collect angry
+   reviews from opposing parties and losing clients. McKenzie Lake
+   (3.6★, 91 reviews, 31% 1-stars) scored 25 in v1 — that's a business
+   quality / industry-niche signal, NOT an attack. v2 removed
+   chronic-low scoring entirely; keep it removed.
+
+**What DOES reliably indicate a real lead, based on what Claude flagged
+in our two verified London leads** (Vanity House salon, Ricky Ratchets
+auto):
+
+- **Textless 1-star reviews** (zero or near-zero review text) from
+  accounts with no other Google reviews — this was the single most
+  reliable signal across both real leads.
+- **Tight time clusters** of 1-stars, especially under an hour apart
+  (Ricky Ratchets had two 1-stars 26 min apart, one with no text).
+- **Vague accusations with no falsifiable specifics** from low-history
+  accounts (e.g. "Not suited for the area. Very low quality work." with
+  no service named, no stylist named, no date).
+- These patterns showed up at depth-50 but were INVISIBLE at depth-10.
+  Don't scale depth below ~50; if anything, consider depth-100 on
+  targeted runs.
+
+**Operational discipline (don't drop these in a future session):**
+
+- Pre-filter precision in testing was ~33% (2 leads of 6 candidates).
+  That's fine. Don't try to "improve" it by relaxing anchors — that
+  re-introduces v1's noise. Improve it by making Claude verification
+  CHEAPER, not the pre-filter SMARTER.
+- ALWAYS run Claude verification before any business becomes a lead.
+  Never email based on `prospect.py` output alone.
+- NEVER commit named-business prospect lists to the repo. The repo is
+  effectively public and "we think these businesses are being attacked"
+  isn't something to publish. Keep prospect CSVs in /tmp or in Devon's
+  private notes; the *engine* belongs in git, the *targets* don't.
+- The whole funnel exists to PROTECT Devon's time — he only ever sees
+  Claude-verified leads. Don't undermine that by routing raw prospector
+  output anywhere user-facing.
+
+**Sub-agent usage for outreach:** verification + email-packet drafting
+parallelize naturally — fan out one Sonnet subagent per candidate when
+a scan produces >2 hits. Each subagent: curl the live API, judge
+honestly (refuse to manufacture a pitch from a clean report — this is
+the guardrail), draft from `docs/OUTREACH.md` template. Do NOT spin up
+subagents for the Nimble pull itself; that's network-bound, not
+Claude-bound, and the in-script thread pool (`--workers`) is the right
+layer.
+
+
 
 1. **Depth**: wire `max_reviews` from the UI through `/api/analyze-tower` to the pipeline (Towerfile + task.py already support it)
 2. **Persistence + auth**: ✅ first cut shipped (Supabase magic-link login, auto-saved scan history, `/dashboard`); next: per-business grouping + rating timeline
