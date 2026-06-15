@@ -22,7 +22,7 @@ create table public.scans (
 
   -- Promoted fields from the AnalyzeResponse (for fast dashboard lists)
   mode text not null,                -- "live" | "stub"
-  reviews_source text not null,      -- "nimble" | "mock"
+  reviews_source text not null,      -- "dataforseo" | "nimble" | "mock"
   reviews_total integer,             -- business's all-time review count (nullable)
   reviews_analyzed integer not null,
   risk_score integer not null,
