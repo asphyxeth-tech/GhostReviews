@@ -14,10 +14,10 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://ghostreviews.app"),
-  title: "ghost.reviews — See the ghosts in your reviews",
+  title: "Ghost Reviews — See the ghosts in your reviews",
   description:
     "Detect coordinated review-bombing attacks on your Google Business Profile. Get a transparent fraud-signal report and a drafted policy-violation removal request you submit to Google.",
-  applicationName: "ghost.reviews",
+  applicationName: "Ghost Reviews",
   authors: [{ name: "asphyxeth-tech" }],
   keywords: [
     "review fraud detection",
@@ -28,15 +28,15 @@ export const metadata: Metadata = {
     "reputation management",
   ],
   openGraph: {
-    title: "ghost.reviews — See the ghosts in your reviews",
+    title: "Ghost Reviews — See the ghosts in your reviews",
     description:
       "Detect coordinated review-bombing attacks on your Google Business Profile.",
     type: "website",
-    siteName: "ghost.reviews",
+    siteName: "Ghost Reviews",
   },
   twitter: {
     card: "summary_large_image",
-    title: "ghost.reviews",
+    title: "Ghost Reviews",
     description:
       "Detect coordinated review-bombing attacks on your Google Business Profile.",
   },

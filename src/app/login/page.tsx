@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { Wordmark } from "@/components/Wordmark";
 
 type Phase = "idle" | "sending" | "sent" | "error";
 
@@ -47,11 +48,7 @@ export default function LoginPage() {
             href="/"
             className="flex items-center gap-2 font-mono text-base tracking-tight"
           >
-            <span
-              aria-hidden
-              className="glow-pulse inline-block h-2 w-2 rounded-full bg-[color:var(--accent)]"
-            />
-            <span>ghost.reviews</span>
+            <Wordmark />
           </Link>
         </div>
       </header>

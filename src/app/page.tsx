@@ -1,4 +1,5 @@
 import { UrlAnalyzeForm } from "@/components/UrlAnalyzeForm";
+import { Wordmark } from "@/components/Wordmark";
 
 const SIGNALS = [
   {
@@ -60,11 +61,7 @@ export default function Home() {
       <header className="px-6 py-6 sm:px-10">
         <div className="mx-auto flex max-w-6xl items-center justify-between">
           <div className="flex items-center gap-2 font-mono text-base tracking-tight">
-            <span
-              aria-hidden
-              className="glow-pulse inline-block h-2 w-2 rounded-full bg-[color:var(--accent)]"
-            />
-            <span>ghost.reviews</span>
+            <Wordmark />
           </div>
           <div className="flex items-center gap-5">
             <a
@@ -74,7 +71,7 @@ export default function Home() {
               Sign in
             </a>
             <a
-              href="mailto:onlinedevon88@gmail.com?subject=ghost.reviews"
+              href="mailto:onlinedevon88@gmail.com?subject=Ghost Reviews"
               className="text-sm text-[color:var(--muted)] transition hover:text-[color:var(--foreground)]"
             >
               Contact →
@@ -95,7 +92,7 @@ export default function Home() {
           </h1>
           <p className="mt-7 max-w-2xl text-lg leading-relaxed text-[color:var(--muted-strong)] sm:text-xl">
             Coordinated review-bombing attacks tank local businesses every day.
-            ghost.reviews scans your Google Business Profile, surfaces the
+            Ghost Reviews scans your Google Business Profile, surfaces the
             fraud signals, and drafts the policy-violation request you submit
             to Google.
           </p>
@@ -177,7 +174,7 @@ export default function Home() {
           />
           <div className="mt-8 space-y-5 text-base leading-relaxed text-[color:var(--muted-strong)]">
             <p>
-              ghost.reviews is a tool for owners who have been targeted by
+              Ghost Reviews is a tool for owners who have been targeted by
               policy-violating review activity. It is not a tool for hiding
               honest negative criticism — suppressing legitimate reviews is
               itself an FTC violation and is firmly out of scope.
@@ -201,18 +198,14 @@ export default function Home() {
           <div className="flex flex-col items-start gap-8 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="flex items-center gap-2 font-mono text-sm">
-                <span
-                  aria-hidden
-                  className="inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--accent)]"
-                />
-                ghost.reviews
+                <Wordmark size="sm" />
               </div>
               <div className="mt-1 text-xs text-[color:var(--muted)]">
                 Independent fraud-signal analysis for local businesses.
               </div>
             </div>
             <a
-              href="mailto:onlinedevon88@gmail.com?subject=ghost.reviews"
+              href="mailto:onlinedevon88@gmail.com?subject=Ghost Reviews"
               className="text-xs text-[color:var(--muted)] transition hover:text-[color:var(--foreground)]"
             >
               Get in touch →

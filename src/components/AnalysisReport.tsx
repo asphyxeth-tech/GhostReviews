@@ -118,7 +118,7 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
           <p className="mt-3 text-sm leading-relaxed text-[color:var(--muted-strong)]">
             Reputation protection is ongoing work. With{" "}
             <span className="font-medium text-[color:var(--foreground)]">
-              ghost.reviews
+              Ghost Reviews
             </span>{" "}
             you get a{" "}
             <strong className="font-medium text-[color:var(--foreground)]">
@@ -133,7 +133,7 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
             coordinated attack appears.
           </p>
           <a
-            href="mailto:onlinedevon88@gmail.com?subject=ghost.reviews%20%E2%80%94%20full%20audit%20%2B%20monitoring&body=I%27d%20like%20the%20complete%20audit%20and%20ongoing%20protection%20for%20my%20business.%20Here%27s%20my%20Google%20Business%20Profile%3A%20"
+            href="mailto:onlinedevon88@gmail.com?subject=Ghost%20Reviews%20%E2%80%94%20full%20audit%20%2B%20monitoring&body=I%27d%20like%20the%20complete%20audit%20and%20ongoing%20protection%20for%20my%20business.%20Here%27s%20my%20Google%20Business%20Profile%3A%20"
             className="mt-5 inline-flex items-center gap-2 rounded-lg bg-[color:var(--accent)] px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-[color:var(--accent-glow)]"
           >
             Get the full audit + ongoing protection →

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { Wordmark } from "@/components/Wordmark";
 
 export const dynamic = "force-dynamic";
 
@@ -54,11 +55,7 @@ export default async function DashboardPage() {
             href="/"
             className="flex items-center gap-2 font-mono text-base tracking-tight"
           >
-            <span
-              aria-hidden
-              className="glow-pulse inline-block h-2 w-2 rounded-full bg-[color:var(--accent)]"
-            />
-            <span>ghost.reviews</span>
+            <Wordmark />
           </Link>
           <div className="flex items-center gap-4 text-sm text-[color:var(--muted)]">
             <span className="hidden sm:inline">{user.email}</span>

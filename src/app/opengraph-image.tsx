@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 
 export const runtime = "edge";
-export const alt = "ghost.reviews — See the ghosts in your reviews";
+export const alt = "Ghost Reviews — See the ghosts in your reviews";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -36,8 +36,16 @@ export default async function Image() {
               boxShadow: "0 0 32px #a78bfa",
             }}
           />
-          <div style={{ fontSize: 32, fontFamily: "ui-monospace, monospace" }}>
-            ghost.reviews
+          <div
+            style={{
+              fontSize: 32,
+              fontFamily: "ui-monospace, monospace",
+              display: "flex",
+            }}
+          >
+            <span style={{ color: "#a78bfa" }}>/</span>
+            <span>ghostreviews</span>
+            <span style={{ color: "#a78bfa" }}>/</span>
           </div>
         </div>
 
@@ -97,7 +105,7 @@ export default async function Image() {
           }}
         >
           <div>Independent fraud-signal analysis for local businesses</div>
-          <div style={{ color: "#a78bfa" }}>ghost.reviews</div>
+          <div style={{ color: "#a78bfa" }}>/ghostreviews/</div>
         </div>
       </div>
     ),
