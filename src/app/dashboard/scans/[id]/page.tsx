@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { AnalysisReport } from "@/components/AnalysisReport";
+import { Wordmark } from "@/components/Wordmark";
 import { AnalyzeResponseSchema } from "@/lib/analysis-schema";
 import { createSupabaseServer } from "@/lib/supabase/server";
 
@@ -45,11 +46,7 @@ export default async function ScanDetailPage({
             href="/"
             className="flex items-center gap-2 font-mono text-base tracking-tight"
           >
-            <span
-              aria-hidden
-              className="glow-pulse inline-block h-2 w-2 rounded-full bg-[color:var(--accent)]"
-            />
-            <span><span className="text-[color:var(--accent)]">/</span>ghostreviews<span className="text-[color:var(--accent)]">/</span></span>
+            <Wordmark />
           </Link>
           <Link
             href="/dashboard"

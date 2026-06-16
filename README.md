@@ -1,8 +1,8 @@
-# ghost.reviews
+# Ghost Reviews
 
 **Catch the ghosts haunting your Google reviews.**
 
-ghost.reviews is a B2B web app that helps local business owners detect coordinated, fraudulent review attacks ("review bombing") on their **Google Business Profile**, produces a transparent evidence report, and drafts an official **policy-violation removal request** they can submit to Google.
+Ghost Reviews is a B2B web app that helps local business owners detect coordinated, fraudulent review attacks ("review bombing") on their **Google Business Profile**, produces a transparent evidence report, and drafts an official **policy-violation removal request** they can submit to Google.
 
 > **Live:** https://ghostreviews.app/
 
@@ -118,7 +118,7 @@ The system is designed to degrade honestly rather than fail. With **no keys**, t
 
 ## Ethical use
 
-ghost.reviews is a tool for owners who have been targeted by **policy-violating** review activity. It is not a tool for hiding honest negative feedback. All output is probabilistic and intended as evidence the owner submits through Google's official channels — we do not, and will not, attempt to delete reviews or game Google's systems.
+Ghost Reviews is a tool for owners who have been targeted by **policy-violating** review activity. It is not a tool for hiding honest negative feedback. All output is probabilistic and intended as evidence the owner submits through Google's official channels — we do not, and will not, attempt to delete reviews or game Google's systems.
 
 ## License
 
