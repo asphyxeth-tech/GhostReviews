@@ -340,7 +340,9 @@ async function fetchReviewsDeep(
     return !crossed;
   };
 
-  let { reviews, nextToken } = parseReviewsPage(parseGoogleJson(rawFirst), 0);
+  const firstPage = parseReviewsPage(parseGoogleJson(rawFirst), 0);
+  const reviews = firstPage.reviews;
+  let nextToken = firstPage.nextToken;
   let keepGoing = absorb({ reviews, nextToken });
 
   const canPaginate = inputUrl.includes("!2s!5m2");

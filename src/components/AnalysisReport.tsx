@@ -33,8 +33,10 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
   const { mode, business_url, generated_at, reviews_source, reviews_total, report } =
     data;
   const badge = RISK_BADGE[report.risk_level] ?? RISK_BADGE.medium;
-  const sourceLabel =
-    reviews_source === "nimble" ? "Live Google data" : "Demo dataset";
+  // Both "dataforseo" (primary) and "nimble" (fallback) are live scrapes;
+  // only "mock" is the bundled demo dataset.
+  const isLive = reviews_source !== "mock";
+  const sourceLabel = isLive ? "Live Google data" : "Demo dataset";
 
   return (
     <div className="animate-fade-in-up text-left">
@@ -91,7 +93,7 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
           <span
             className="inline-flex items-center rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-2 py-0.5 text-[10px] uppercase tracking-widest text-[color:var(--muted-strong)]"
             title={
-              reviews_source === "nimble"
+              isLive
                 ? "Reviews pulled live from your public Google profile"
                 : "Reviews from the bundled sample dataset"
             }
@@ -104,7 +106,7 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
         </div>
       </div>
 
-      {reviews_source === "nimble" && (
+      {isLive && (
         <div className="mt-6 rounded-2xl border border-[color:var(--accent)]/30 bg-[color:var(--accent)]/[0.06] p-6 sm:p-7">
           <h3 className="text-base font-semibold text-[color:var(--foreground)]">
             This is a free preview

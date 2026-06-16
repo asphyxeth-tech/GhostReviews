@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { analyzeReviewsWithClaude } from "@/lib/anthropic";
-import { scrapeBusinessReviews } from "@/lib/nimble";
+import { getBusinessReviews } from "@/lib/reviews";
 import { MOCK_REVIEWS, MOCK_REPORT } from "@/lib/mock-data";
 import { AnalyzeResponseSchema, type AnalyzeResponse } from "@/lib/analysis-schema";
 import { saveScanIfAuthenticated } from "@/lib/scan-store";
@@ -41,13 +41,15 @@ export async function POST(req: NextRequest) {
     const mode: "stub" | "live" = hasKey ? "live" : "stub";
 
     // In stub mode the canned MOCK_REPORT flags specific review IDs from
-    // MOCK_REVIEWS — so we must NOT swap in Nimble-scraped reviews there,
-    // or the UI would label a Nimble batch with a mismatched report. Only
-    // scrape when we're actually going to analyze the batch with Claude.
-    const scrape = hasKey ? await scrapeBusinessReviews(url, WEB_MAX_REVIEWS) : null;
+    // MOCK_REVIEWS — so we must NOT swap in scraped reviews there, or the UI
+    // would label a live batch with a mismatched report. Only scrape when
+    // we're actually going to analyze the batch with Claude.
+    const scrape = hasKey ? await getBusinessReviews(url, WEB_MAX_REVIEWS) : null;
     const haveLive = Boolean(scrape && scrape.reviews.length > 0);
     const reviews = haveLive ? scrape!.reviews : MOCK_REVIEWS;
-    const reviewsSource: "nimble" | "mock" = haveLive ? "nimble" : "mock";
+    const reviewsSource: "dataforseo" | "nimble" | "mock" = haveLive
+      ? scrape!.source
+      : "mock";
 
     const report = hasKey
       ? await analyzeReviewsWithClaude(
