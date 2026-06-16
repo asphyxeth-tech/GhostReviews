@@ -51,7 +51,7 @@ export default function LoginPage() {
               aria-hidden
               className="glow-pulse inline-block h-2 w-2 rounded-full bg-[color:var(--accent)]"
             />
-            <span>ghost.reviews</span>
+            <span><span className="text-[color:var(--accent)]">/</span>ghostreviews<span className="text-[color:var(--accent)]">/</span></span>
           </Link>
         </div>
       </header>

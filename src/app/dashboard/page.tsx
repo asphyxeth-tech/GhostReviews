@@ -58,7 +58,7 @@ export default async function DashboardPage() {
               aria-hidden
               className="glow-pulse inline-block h-2 w-2 rounded-full bg-[color:var(--accent)]"
             />
-            <span>ghost.reviews</span>
+            <span><span className="text-[color:var(--accent)]">/</span>ghostreviews<span className="text-[color:var(--accent)]">/</span></span>
           </Link>
           <div className="flex items-center gap-4 text-sm text-[color:var(--muted)]">
             <span className="hidden sm:inline">{user.email}</span>

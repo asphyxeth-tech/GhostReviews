@@ -64,7 +64,7 @@ export default function Home() {
               aria-hidden
               className="glow-pulse inline-block h-2 w-2 rounded-full bg-[color:var(--accent)]"
             />
-            <span>ghost.reviews</span>
+            <span><span className="text-[color:var(--accent)]">/</span>ghostreviews<span className="text-[color:var(--accent)]">/</span></span>
           </div>
           <div className="flex items-center gap-5">
             <a
@@ -205,7 +205,7 @@ export default function Home() {
                   aria-hidden
                   className="inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--accent)]"
                 />
-                ghost.reviews
+                <span className="text-[color:var(--accent)]">/</span>ghostreviews<span className="text-[color:var(--accent)]">/</span>
               </div>
               <div className="mt-1 text-xs text-[color:var(--muted)]">
                 Independent fraud-signal analysis for local businesses.
