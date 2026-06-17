@@ -99,3 +99,92 @@ The integration requires the following env vars on the Next.js side (set in Verc
 - [x] Replace `mock_reviews.json` with a live scrape step using the Nimble API (now gated on `NIMBLE_API_KEY`)
 - [ ] Add a scheduled-run example (`tower schedules create ...`) for periodic monitoring
 - [x] Wire the Next.js API route to invoke this Tower app for "deep scan" requests
+
+---
+
+## prospect.py — outbound prospect pre-filter
+
+`pipeline/prospect.py` is **Stage 1** of the two-stage review-bombing detection funnel.  It is the cheap heuristic that narrows a long list of businesses down to a handful of candidates, which are then verified by Claude (Stage 2 — the web app or `task.py`).
+
+> **The engine belongs in git; the targets do not.**
+> Never commit result files — they name businesses you suspect are under attack, and the repo is effectively public.  All output goes to `/tmp` (or a path you choose with `--out`).
+
+### What it is (and is NOT)
+
+- It scores businesses on review *metadata* (timing, reviewer history, star distribution) via the DataForSEO API.  **No Claude calls.**
+- It is NOT a verifier.  A candidate score of ≥ 50 means "worth Claude's time", not "this is a fake attack".  Always run Claude verification before any outreach.
+- Pre-filter precision from live testing was ~33% (2 leads in 6 candidates).  That is fine and expected — improve it by making Claude verification cheaper, not the pre-filter stricter.
+
+### Prerequisites
+
+No extra pip dependencies beyond what is already in `requirements.txt`.  The script uses only Python stdlib (urllib, concurrent.futures, argparse, csv, json, datetime).
+
+Set the following environment variables:
+
+| Env var | Required | Notes |
+| --- | --- | --- |
+| `DATAFORSEO_LOGIN` | Yes | Your DataForSEO account email |
+| `DATAFORSEO_PASSWORD` | Yes | DataForSEO API password |
+| `DATAFORSEO_LOCATION_CODE` | No | Defaults to `2840` (United States).  E.g. `2124` = Canada, `2826` = UK |
+
+### Input file format
+
+One business per line.  Accepts either a Google Maps URL or a `Business Name, City` string.  Blank lines and `#` comments are ignored.
+
+```
+# London ON prospects — June 2026
+Vanity House, London ON
+https://www.google.com/maps/place/Ricky+Ratchets+Auto+Service/...
+# Another Hair Salon, London ON
+```
+
+### Standard run
+
+```bash
+# Basic: pull 75 reviews per business, 4 parallel workers, output to /tmp
+python3 pipeline/prospect.py --input /tmp/my_businesses.txt
+
+# Custom depth and output path (keep outputs out of the repo)
+python3 pipeline/prospect.py \
+  --input /tmp/my_businesses.txt \
+  --depth 100 \
+  --workers 8 \
+  --out /tmp/prospect_results_2026-06.json
+```
+
+Output: a JSON file of candidates sorted by score, plus a `.csv` alongside it, plus a summary table printed to stdout.  Each candidate record includes:
+
+- total score + per-rule breakdown
+- the specific reviews that triggered each signal (id, rating, timestamp, reviewer history, text snippet)
+- the raw counts (burst window negatives, tightest cluster gap in minutes, etc.) so you can sanity-check before handing to Claude
+
+### Depth-sweep calibration mode
+
+When you want to know at what depth attack signals first appear and where the score stabilises, use `--depth-sweep`.  Instead of a candidate list it scans each business at depths 25 / 50 / 75 / 100 / 150 and prints a per-business table.
+
+```bash
+python3 pipeline/prospect.py \
+  --input /tmp/my_businesses.txt \
+  --depth-sweep \
+  --out /tmp/sweep_results.json
+```
+
+From live testing: real attack signals were invisible at depth 10 but appeared clearly at depth 50.  Use standard depth ≥ 75.
+
+### Scoring rules (v2)
+
+| Rule | Points | Type | Fires when |
+| --- | --- | --- | --- |
+| BURST | +40 | Anchor | ≥ 3 negative (≤ 2★) reviews in any 14-day window **and** the count is ≥ 3× the expected baseline rate (velocity-normalised to avoid flagging high-volume businesses) |
+| SPIKE | +40 | Anchor | ≥ 3 one-star reviews in any 7-day window **and** the all-time 1★ share is < 20% |
+| THROWAWAY | +20 | Corroboration | ≥ 2 recent negatives from accounts with ≤ 2 lifetime reviews — **only** when an anchor already fired |
+| TEXTLESS | +15 | Corroboration | ≥ 1 empty/near-empty (≤ 3 words) 1★ review from a low-history account — **only** when an anchor fired |
+| TIGHT_CLUSTER | +15 | Corroboration | ≥ 2 negatives posted within 60 minutes — **only** when an anchor fired |
+
+A business is a **candidate** when total score ≥ 50.  Without at least one anchor (BURST or SPIKE), the score is forced to 0 regardless of corroboration — this was the key lesson from v1 live testing.
+
+### Operational rules
+
+- **Never outreach based on prospect.py output alone.**  Always run Claude verification first.
+- **Never commit result files to the repo.**  Keep CSVs and JSONs in `/tmp` or Devon's private notes.
+- Output path defaults to `/tmp/prospect_results.json`.  If you override `--out`, keep it outside the repo.

@@ -1,0 +1,1203 @@
+"""ghost.reviews — prospect pre-filter.
+
+This is STAGE ONE of the two-stage review-bombing detection funnel:
+
+    Stage 1 (this script): cheap heuristic pre-filter.
+        Reads public review metadata via DataForSEO.  Scores each business
+        against a set of lightweight signals.  Outputs a short candidate list
+        (score >= 50) for human review.  NO Claude calls here.
+
+    Stage 2 (web app / task.py): Claude verification.
+        For each candidate, a human pastes the business URL into ghost.reviews
+        or runs the pipeline directly.  Claude reads the actual review *content*
+        and produces the forensic report.
+
+Why the split?  The pre-filter costs pennies across dozens of businesses.
+Claude verification costs cents per business.  We NARROW with heuristics,
+then VERIFY with intelligence.  Never conflate the two.
+
+IMPORTANT: this script outputs candidate lists to /tmp (or --out), NOT to the
+repo.  The engine (this file) belongs in git; the targets (the businesses we
+think might be under attack) do NOT.  Committing a named-business list would
+effectively publish "we suspect these businesses are being attacked" to the
+whole internet — that is harmful and off the table.
+
+DataForSEO API notes (mirrors src/lib/dataforseo.ts):
+  - Auth: HTTP Basic, DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD env vars.
+  - Base URL: https://api.dataforseo.com/v3
+  - Reviews: task-based (POST task_post, then poll task_get/{id}).
+  - Business info / rating distribution: live/synchronous via my_business_info/live.
+  - Location: DATAFORSEO_LOCATION_CODE env (default 2840 = United States).
+
+Usage examples — see pipeline/README.md for full docs.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import csv
+import concurrent.futures
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from typing import Any
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+BASE_URL = "https://api.dataforseo.com/v3"
+DEFAULT_LOCATION_CODE = 2840   # United States (matches dataforseo.ts)
+REQUEST_TIMEOUT_S = 25         # per HTTP call
+POLL_INTERVAL_S = 5            # how long to wait between task_get polls
+POLL_BUDGET_S = 300            # max time (5 min) to wait for a single task
+
+# Depth levels used by --depth-sweep mode.
+SWEEP_DEPTHS = [25, 50, 75, 100, 150]
+
+# Scoring constants — v2 (see CLAUDE.md "Outreach engine" and the spec above).
+SCORE_BURST = 40
+SCORE_SPIKE = 40
+SCORE_THROWAWAY = 20
+SCORE_TEXTLESS = 15
+SCORE_TIGHT_CLUSTER = 15
+
+# A business must reach this threshold to appear in the candidate list.
+CANDIDATE_THRESHOLD = 50
+
+# Burst / spike detection windows.
+BURST_WINDOW_DAYS = 14
+SPIKE_WINDOW_DAYS = 7
+
+# Velocity normalisation: burst only fires if the observed count is at least
+# this many times the business's typical negatives-per-window rate.
+BURST_VELOCITY_MULTIPLIER = 3.0
+
+# How many negatives must fall in the burst window.
+BURST_MIN_COUNT = 3
+
+# How many 1-star reviews must fall in the spike window.
+SPIKE_MIN_COUNT = 3
+
+# Spike only fires when the business's all-time 1-star share is below this.
+SPIKE_MAX_ONESTAR_SHARE = 0.20   # 20 %
+
+# THROWAWAY: at least this many recent negatives from low-history accounts.
+THROWAWAY_MIN_COUNT = 2
+THROWAWAY_MAX_REVIEWS = 2        # "low-history" threshold
+
+# TEXTLESS: empty or at most this many words.
+TEXTLESS_MAX_WORDS = 3
+
+# TIGHT_CLUSTER: at least this many negatives within this many minutes.
+TIGHT_CLUSTER_MIN_COUNT = 2
+TIGHT_CLUSTER_WINDOW_MINUTES = 60
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _dig(obj: Any, path: list) -> Any:
+    """Safe nested getter — returns None on any miss (mirrors task.py)."""
+    cur = obj
+    for key in path:
+        if cur is None:
+            return None
+        try:
+            cur = cur[key]
+        except (KeyError, IndexError, TypeError):
+            return None
+    return cur
+
+
+def _to_iso(value: Any) -> str:
+    """Convert a DataForSEO timestamp string to ISO 8601.
+
+    DataForSEO review timestamps look like "2024-05-05 14:09:32 +00:00".
+    Normalize the space-separated format; fall back to 'now' on failure.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if not isinstance(value, str) or not value.strip():
+        return now_iso
+    normalized = value.strip().replace(" ", "T", 1)  # first space only
+    # "2024-05-05T14:09:32 +00:00" -> "2024-05-05T14:09:32+00:00"
+    normalized = normalized.replace(" ", "")
+    try:
+        d = datetime.fromisoformat(normalized)
+        return d.isoformat()
+    except ValueError:
+        pass
+    try:
+        d = datetime.fromisoformat(value)
+        return d.isoformat()
+    except ValueError:
+        return now_iso
+
+
+def _parse_posted_at(iso_str: str) -> float:
+    """Convert an ISO 8601 string to a UTC timestamp (seconds).  Returns 0
+    on failure so broken timestamps don't crash scoring."""
+    try:
+        d = datetime.fromisoformat(iso_str)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return d.timestamp()
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _word_count(text: str) -> int:
+    """Count space-separated words; empty string = 0."""
+    return len(text.split()) if text and text.strip() else 0
+
+
+def _derive_search_query(raw: str) -> str:
+    """Turn a Google Maps URL or 'Name, City' string into a plain-text
+    search query.  Mirrors deriveSearchQuery in dataforseo.ts / task.py."""
+    import re
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    raw = raw.strip()
+    if not raw:
+        return raw
+
+    # Canonical maps.google.com URL has the name embedded in the path.
+    match = re.search(r"/maps/place/([^/@]+)", raw)
+    if match:
+        name = unquote(match.group(1).replace("+", " ")).strip()
+        if name:
+            return name
+
+    # Any URL: try ?q= or ?query= params.
+    try:
+        parsed = urlparse(raw)
+        if parsed.scheme and parsed.query:
+            qs = parse_qs(parsed.query)
+            for key in ("q", "query"):
+                if qs.get(key):
+                    return qs[key][0].strip()
+    except ValueError:
+        pass
+
+    # Not a URL at all: treat as a plain "Business Name, City" string.
+    return raw
+
+
+# ---------------------------------------------------------------------------
+# DataForSEO HTTP layer (stdlib-only, mirrors dataforseo.ts)
+# ---------------------------------------------------------------------------
+
+def _get_auth_header() -> str | None:
+    """Build the HTTP Basic auth header from env vars.  Returns None when
+    credentials are not configured — callers must check and fail gracefully."""
+    login = os.environ.get("DATAFORSEO_LOGIN", "").strip()
+    password = os.environ.get("DATAFORSEO_PASSWORD", "").strip()
+    if not login or not password:
+        return None
+    token = base64.b64encode(f"{login}:{password}".encode()).decode()
+    return f"Basic {token}"
+
+
+def _get_location_code() -> int:
+    """Read DATAFORSEO_LOCATION_CODE env; default 2840 (US)."""
+    raw = os.environ.get("DATAFORSEO_LOCATION_CODE", "").strip()
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        return DEFAULT_LOCATION_CODE
+
+
+def _dfs_post(path: str, auth: str, body: list, timeout: int = REQUEST_TIMEOUT_S) -> dict | None:
+    """POST JSON to a DataForSEO endpoint; return parsed dict or None."""
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE_URL}{path}",
+        data=data,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": auth,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status < 200 or resp.status >= 300:
+                return None
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError):
+        return None
+
+
+def _dfs_get(path: str, auth: str, timeout: int = REQUEST_TIMEOUT_S) -> dict | None:
+    """GET a DataForSEO endpoint; return parsed dict or None."""
+    req = urllib.request.Request(
+        f"{BASE_URL}{path}",
+        method="GET",
+        headers={
+            "Accept": "application/json",
+            "Authorization": auth,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status < 200 or resp.status >= 300:
+                return None
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Business info (synchronous — rating distribution baseline)
+# ---------------------------------------------------------------------------
+
+def fetch_business_info(auth: str, query: str, location_code: int) -> dict | None:
+    """Resolve the business and pull its all-time rating distribution via the
+    synchronous my_business_info/live endpoint.
+
+    Returns a dict with keys: cid, place_id, rating_summary (may be None).
+    Returns None when the business can't be resolved.
+
+    This mirrors fetchBusinessInfo in dataforseo.ts.
+    """
+    resp = _dfs_post(
+        "/business_data/google/my_business_info/live",
+        auth,
+        [
+            {
+                "keyword": query,
+                "location_code": location_code,
+                "language_code": "en",
+                "tag": "ghost-reviews-prospect",
+            }
+        ],
+    )
+    item = _dig(resp, ["tasks", 0, "result", 0, "items", 0])
+    if item is None:
+        return None
+
+    # Extract rating distribution from the item.
+    rating_summary = None
+    overall = _dig(item, ["rating", "value"])
+    votes = _dig(item, ["rating", "votes_count"])
+    dist = _dig(item, ["rating_distribution"])
+    counts: dict[str, int] = {}
+    if isinstance(dist, dict):
+        for s in ("1", "2", "3", "4", "5"):
+            v = dist.get(s)
+            try:
+                counts[s] = int(v)
+            except (TypeError, ValueError):
+                pass
+    try:
+        overall_f = float(overall)
+    except (TypeError, ValueError):
+        overall_f = 0.0
+    try:
+        votes_i = int(votes)
+    except (TypeError, ValueError):
+        votes_i = 0
+
+    if overall_f or votes_i or counts:
+        rating_summary = {
+            "overall_rating": overall_f,
+            "review_count": votes_i,
+            "ratings_count": counts,
+        }
+
+    cid = _dig(item, ["cid"])
+    place_id = _dig(item, ["place_id"])
+    return {
+        "cid": cid if isinstance(cid, str) and cid else None,
+        "place_id": place_id if isinstance(place_id, str) and place_id else None,
+        "rating_summary": rating_summary,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Reviews (task-based — POST then poll)
+# ---------------------------------------------------------------------------
+
+def post_reviews_task(
+    auth: str,
+    identifier: dict,
+    location_code: int,
+    depth: int,
+) -> str | None:
+    """POST a reviews task; return the task UUID or None on failure.
+
+    `identifier` is one of: {"cid": "..."}, {"place_id": "..."}, or
+    {"keyword": "..."} — in that preference order (exact > fuzzy).
+
+    DataForSEO operates depth in multiples of 10; we round up before calling.
+    This mirrors postReviewsTask in dataforseo.ts.
+    """
+    # Round depth up to the nearest 10 (DataForSEO requirement).
+    depth_rounded = max(10, (depth + 9) // 10 * 10)
+    resp = _dfs_post(
+        "/business_data/google/reviews/task_post",
+        auth,
+        [
+            {
+                **identifier,
+                "location_code": location_code,
+                "language_code": "en",
+                "depth": depth_rounded,
+                "sort_by": "newest",   # chronological order — essential for fresh-attack detection
+                "tag": "ghost-reviews-prospect",
+            }
+        ],
+    )
+    task_id = _dig(resp, ["tasks", 0, "id"])
+    return task_id if isinstance(task_id, str) and task_id else None
+
+
+def poll_reviews_task(auth: str, task_id: str) -> list | None:
+    """Poll task_get until we have review items, the task finishes empty, or
+    we exhaust POLL_BUDGET_S.  Returns a list of raw DataForSEO review items
+    (may be empty) or None on timeout / hard failure.
+
+    task_get calls are free, so polling is cheap.
+    This mirrors pollReviewsTask in dataforseo.ts.
+    """
+    deadline = time.monotonic() + POLL_BUDGET_S
+    while time.monotonic() < deadline:
+        resp = _dfs_get(
+            f"/business_data/google/reviews/task_get/{task_id}",
+            auth,
+        )
+        items = _dig(resp, ["tasks", 0, "result", 0, "items"])
+        if isinstance(items, list) and items:
+            return items
+
+        # Task finished with no reviews — don't wait out the full budget.
+        status_code = _dig(resp, ["tasks", 0, "status_code"])
+        result_count = _dig(resp, ["tasks", 0, "result_count"])
+        try:
+            if int(status_code) == 20000 and int(result_count) == 0:
+                return []
+        except (TypeError, ValueError):
+            pass
+
+        time.sleep(POLL_INTERVAL_S)
+    return None
+
+
+def map_review_items(items: list) -> list[dict]:
+    """Map raw DataForSEO review items to our internal review shape.
+
+    Fields used downstream by scoring:
+        id, rating, posted_at (ISO 8601), reviewer_total_reviews, text
+
+    Mirrors mapReviewItems in dataforseo.ts.
+    """
+    out = []
+    for i, item in enumerate(items):
+        rating_val = _dig(item, ["rating", "value"])
+        try:
+            rating = max(1, min(5, round(float(rating_val))))
+        except (TypeError, ValueError):
+            continue   # not a review row
+
+        posted_raw = _dig(item, ["timestamp"])
+        posted_at = _to_iso(posted_raw)
+
+        review_id = _dig(item, ["review_id"])
+        name = _dig(item, ["profile_name"])
+        count = _dig(item, ["reviews_count"])
+        text = _dig(item, ["review_text"])   # None for textless reviews
+
+        try:
+            total_reviews = int(count)
+        except (TypeError, ValueError):
+            total_reviews = 0
+
+        out.append(
+            {
+                "id": review_id if isinstance(review_id, str) and review_id else f"dfs-{i}",
+                "reviewer_name": name if isinstance(name, str) and name.strip() else "Anonymous",
+                "reviewer_total_reviews": total_reviews,
+                "rating": rating,
+                "posted_at": posted_at,
+                "text": text if isinstance(text, str) else "",
+            }
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Per-business data pull
+# ---------------------------------------------------------------------------
+
+def pull_business_data(
+    auth: str,
+    query: str,
+    location_code: int,
+    depth: int,
+) -> dict | None:
+    """Resolve a business, pull its rating baseline and recent reviews.
+
+    Returns:
+        {
+            "query": str,
+            "rating_summary": dict | None,  # all-time baseline
+            "reviews": list[dict],           # newest-first, up to `depth`
+        }
+    or None on failure (network error, business not found, task timeout).
+
+    The two-step process:
+        1. my_business_info/live (sync) — gives us cid/place_id + baseline.
+        2. reviews/task_post + task_get poll (async) — gives us reviews.
+    """
+    info = fetch_business_info(auth, query, location_code)
+
+    # Choose the most precise identifier available.
+    if info and info.get("cid"):
+        identifier = {"cid": info["cid"]}
+    elif info and info.get("place_id"):
+        identifier = {"place_id": info["place_id"]}
+    else:
+        # Fall back to keyword search; may resolve the wrong business
+        # if the name is ambiguous, but it's our only option.
+        identifier = {"keyword": query}
+
+    task_id = post_reviews_task(auth, identifier, location_code, depth)
+    if not task_id:
+        return None
+
+    raw_items = poll_reviews_task(auth, task_id)
+    if raw_items is None:
+        # Timed out.
+        return None
+
+    reviews = map_review_items(raw_items)
+    # Sort newest-first (DataForSEO should already do this, but be safe).
+    reviews.sort(key=lambda r: _parse_posted_at(r["posted_at"]), reverse=True)
+
+    return {
+        "query": query,
+        "rating_summary": info["rating_summary"] if info else None,
+        "reviews": reviews,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Scoring (v2 — see CLAUDE.md for methodology rationale)
+# ---------------------------------------------------------------------------
+
+def _seconds_between(ts_a: str, ts_b: str) -> float:
+    """Return |ts_a - ts_b| in seconds.  0 on parse failure."""
+    a = _parse_posted_at(ts_a)
+    b = _parse_posted_at(ts_b)
+    return abs(a - b)
+
+
+def _expected_negatives_per_window(
+    rating_summary: dict | None,
+    reviews: list[dict],
+    window_days: int,
+) -> float:
+    """Estimate how many negative (≤2★) reviews we'd expect in `window_days`
+    based on the business's overall cadence.
+
+    Strategy:
+        1. Use the all-time review count from rating_summary if available.
+        2. Estimate the time span covered by the pulled reviews.
+        3. Derive: expected = (total_reviews * neg_share) / age_days * window_days
+
+    Falls back to 0.0 (conservative — fires the anchor) when we don't have
+    enough data to estimate.  A return of 0.0 means "we can't tell, allow it
+    through."
+    """
+    if not reviews:
+        return 0.0
+
+    # All-time total review count.
+    total_reviews = 0
+    if rating_summary:
+        try:
+            total_reviews = int(rating_summary.get("review_count", 0))
+        except (TypeError, ValueError):
+            pass
+
+    # All-time negative share (1★ + 2★).
+    neg_share = 0.0
+    if rating_summary and rating_summary.get("ratings_count"):
+        rc = rating_summary["ratings_count"]
+        try:
+            ones = int(rc.get("1", 0))
+            twos = int(rc.get("2", 0))
+            total = max(1, total_reviews)
+            neg_share = (ones + twos) / total
+        except (TypeError, ValueError):
+            neg_share = 0.0
+
+    if total_reviews == 0 or neg_share == 0.0:
+        # Can't estimate — fall back: return 0 (caller treats as "unknown,
+        # don't suppress the anchor on insufficient data").
+        return 0.0
+
+    # Estimate business age in days from the oldest review we pulled.
+    oldest_ts = min(_parse_posted_at(r["posted_at"]) for r in reviews)
+    newest_ts = max(_parse_posted_at(r["posted_at"]) for r in reviews)
+    span_days = (newest_ts - oldest_ts) / 86400.0
+
+    # If we only have a tiny span (e.g. all reviews today), use a
+    # rough estimate: assume the pulled depth covers ~3 months of activity.
+    if span_days < 7:
+        span_days = 90.0
+
+    # Expected negatives over the life of the business.
+    expected_total_neg = total_reviews * neg_share
+    # Pro-rate to the window.
+    expected_per_window = expected_total_neg / max(span_days, 1) * window_days
+    return expected_per_window
+
+
+def _find_rolling_window_peak(
+    reviews: list[dict],
+    window_days: int,
+    min_rating: int,
+    max_rating: int,
+) -> tuple[int, list[dict]]:
+    """Find the maximum number of reviews with rating in [min_rating,
+    max_rating] that fall within any rolling `window_days` window.
+
+    Returns (peak_count, reviews_in_that_window).
+    Uses a sliding two-pointer approach over the sorted review list.
+    """
+    # Filter to the target rating band, sorted oldest-first for the window sweep.
+    targeted = [
+        r for r in reviews
+        if min_rating <= r["rating"] <= max_rating
+    ]
+    targeted.sort(key=lambda r: _parse_posted_at(r["posted_at"]))
+
+    if not targeted:
+        return 0, []
+
+    window_seconds = window_days * 86400.0
+    best_count = 0
+    best_window: list[dict] = []
+    left = 0
+
+    for right in range(len(targeted)):
+        t_right = _parse_posted_at(targeted[right]["posted_at"])
+        # Advance left pointer until the window fits.
+        while True:
+            t_left = _parse_posted_at(targeted[left]["posted_at"])
+            if t_right - t_left <= window_seconds:
+                break
+            left += 1
+        window_size = right - left + 1
+        if window_size > best_count:
+            best_count = window_size
+            best_window = targeted[left: right + 1]
+
+    return best_count, best_window
+
+
+def score_business(data: dict) -> dict:
+    """Compute the v2 heuristic score for one business.
+
+    Returns a score dict with:
+        score           — total points (0 if no anchor fired)
+        rules_fired     — list of rule names that contributed
+        breakdown       — {rule_name: points}
+        counts          — raw counts that drove the score
+        flagged_reviews — list of review dicts that triggered signals
+        anchor_fired    — bool (False means score forced to 0)
+
+    Methodology is defined in CLAUDE.md and the module docstring above.
+    No Claude calls here — this is the cheap heuristic layer only.
+    """
+    rating_summary = data.get("rating_summary")
+    reviews = data.get("reviews", [])
+
+    result = {
+        "score": 0,
+        "rules_fired": [],
+        "breakdown": {},
+        "counts": {
+            "total_reviews_pulled": len(reviews),
+            "burst_window_negatives": 0,
+            "spike_window_ones": 0,
+            "throwaway_negatives": 0,
+            "textless_onestar_throwaway": 0,
+            "tightest_cluster_gap_minutes": None,
+        },
+        "flagged_reviews": [],
+        "anchor_fired": False,
+    }
+
+    if not reviews:
+        return result
+
+    # ------------------------------------------------------------------
+    # ANCHOR 1: BURST
+    #   ≥3 negatives (≤2★) in any 14-day window, velocity-normalised.
+    #   Only fires when the observed count is ≥3× the expected baseline.
+    # ------------------------------------------------------------------
+    burst_count, burst_window = _find_rolling_window_peak(
+        reviews, BURST_WINDOW_DAYS, min_rating=1, max_rating=2
+    )
+    result["counts"]["burst_window_negatives"] = burst_count
+
+    burst_fired = False
+    if burst_count >= BURST_MIN_COUNT:
+        expected = _expected_negatives_per_window(
+            rating_summary, reviews, BURST_WINDOW_DAYS
+        )
+        # If we can't estimate the baseline (expected == 0), allow the
+        # anchor through — conservative default favours flagging.
+        if expected == 0.0 or burst_count >= BURST_VELOCITY_MULTIPLIER * expected:
+            burst_fired = True
+            result["anchor_fired"] = True
+            result["rules_fired"].append("BURST")
+            result["breakdown"]["BURST"] = SCORE_BURST
+            result["score"] += SCORE_BURST
+            for r in burst_window:
+                if r not in result["flagged_reviews"]:
+                    result["flagged_reviews"].append(r)
+
+    # ------------------------------------------------------------------
+    # ANCHOR 2: SPIKE
+    #   ≥3 one-star reviews in any 7-day window, when all-time 1★ share < 20%.
+    # ------------------------------------------------------------------
+    spike_count, spike_window = _find_rolling_window_peak(
+        reviews, SPIKE_WINDOW_DAYS, min_rating=1, max_rating=1
+    )
+    result["counts"]["spike_window_ones"] = spike_count
+
+    spike_fired = False
+    onestar_share = 0.0
+    if rating_summary and rating_summary.get("ratings_count"):
+        rc = rating_summary["ratings_count"]
+        total = max(1, int(rating_summary.get("review_count", 1) or 1))
+        try:
+            ones = int(rc.get("1", 0))
+            onestar_share = ones / total
+        except (TypeError, ValueError):
+            onestar_share = 0.0
+
+    if spike_count >= SPIKE_MIN_COUNT and onestar_share < SPIKE_MAX_ONESTAR_SHARE:
+        spike_fired = True
+        result["anchor_fired"] = True
+        result["rules_fired"].append("SPIKE")
+        result["breakdown"]["SPIKE"] = SCORE_SPIKE
+        result["score"] += SCORE_SPIKE
+        for r in spike_window:
+            if r not in result["flagged_reviews"]:
+                result["flagged_reviews"].append(r)
+
+    # If neither anchor fired, force score to 0 and return early.
+    # Corroboration signals CANNOT substitute for an anchor (v2 design).
+    if not result["anchor_fired"]:
+        result["score"] = 0
+        return result
+
+    # ------------------------------------------------------------------
+    # CORROBORATION 1: THROWAWAY
+    #   ≥2 of the recent negatives from accounts with ≤2 lifetime reviews.
+    #   Only counted when an anchor already fired (enforced by the block above).
+    # ------------------------------------------------------------------
+    recent_negatives = [r for r in reviews if r["rating"] <= 2]
+    throwaway_negs = [
+        r for r in recent_negatives
+        if r.get("reviewer_total_reviews", 999) <= THROWAWAY_MAX_REVIEWS
+    ]
+    result["counts"]["throwaway_negatives"] = len(throwaway_negs)
+
+    if len(throwaway_negs) >= THROWAWAY_MIN_COUNT:
+        result["rules_fired"].append("THROWAWAY")
+        result["breakdown"]["THROWAWAY"] = SCORE_THROWAWAY
+        result["score"] += SCORE_THROWAWAY
+        for r in throwaway_negs:
+            if r not in result["flagged_reviews"]:
+                result["flagged_reviews"].append(r)
+
+    # ------------------------------------------------------------------
+    # CORROBORATION 2: TEXTLESS
+    #   ≥1 textless/near-textless (≤3 words) 1★ review from a low-history
+    #   (≤2 reviews) account.  The single most reliable signal from live
+    #   testing (see CLAUDE.md).
+    # ------------------------------------------------------------------
+    onestar_reviews = [r for r in reviews if r["rating"] == 1]
+    textless_throwaway = [
+        r for r in onestar_reviews
+        if _word_count(r.get("text", "")) <= TEXTLESS_MAX_WORDS
+        and r.get("reviewer_total_reviews", 999) <= THROWAWAY_MAX_REVIEWS
+    ]
+    result["counts"]["textless_onestar_throwaway"] = len(textless_throwaway)
+
+    if textless_throwaway:
+        result["rules_fired"].append("TEXTLESS")
+        result["breakdown"]["TEXTLESS"] = SCORE_TEXTLESS
+        result["score"] += SCORE_TEXTLESS
+        for r in textless_throwaway:
+            if r not in result["flagged_reviews"]:
+                result["flagged_reviews"].append(r)
+
+    # ------------------------------------------------------------------
+    # CORROBORATION 3: TIGHT_CLUSTER
+    #   ≥2 negatives posted within 60 minutes of each other.
+    #   From live testing: Ricky Ratchets had two 1-stars 26 min apart.
+    # ------------------------------------------------------------------
+    all_neg_sorted = sorted(
+        recent_negatives,
+        key=lambda r: _parse_posted_at(r["posted_at"]),
+    )
+    tightest_gap: float | None = None
+    tight_pair: list[dict] = []
+
+    for i in range(len(all_neg_sorted) - 1):
+        gap_s = _seconds_between(
+            all_neg_sorted[i]["posted_at"],
+            all_neg_sorted[i + 1]["posted_at"],
+        )
+        gap_min = gap_s / 60.0
+        if tightest_gap is None or gap_min < tightest_gap:
+            tightest_gap = gap_min
+            tight_pair = [all_neg_sorted[i], all_neg_sorted[i + 1]]
+
+    if tightest_gap is not None:
+        result["counts"]["tightest_cluster_gap_minutes"] = round(tightest_gap, 1)
+
+    if tightest_gap is not None and tightest_gap <= TIGHT_CLUSTER_WINDOW_MINUTES:
+        # Count how many negatives fall within the tightest 60-min window.
+        pair_ts = [
+            _parse_posted_at(r["posted_at"])
+            for r in tight_pair
+        ]
+        window_start = min(pair_ts)
+        window_end = max(pair_ts)
+        cluster_reviews = [
+            r for r in all_neg_sorted
+            if window_start - 0.1 <= _parse_posted_at(r["posted_at"]) <= window_end + 0.1
+        ]
+        if len(cluster_reviews) >= TIGHT_CLUSTER_MIN_COUNT:
+            result["rules_fired"].append("TIGHT_CLUSTER")
+            result["breakdown"]["TIGHT_CLUSTER"] = SCORE_TIGHT_CLUSTER
+            result["score"] += SCORE_TIGHT_CLUSTER
+            for r in cluster_reviews:
+                if r not in result["flagged_reviews"]:
+                    result["flagged_reviews"].append(r)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Output formatting
+# ---------------------------------------------------------------------------
+
+def _snippet(text: str, max_chars: int = 120) -> str:
+    """Return a short excerpt of review text for the output."""
+    if not text or not text.strip():
+        return "(no text)"
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rsplit(" ", 1)[0] + "…"
+
+
+def build_candidate_record(query: str, data: dict, score_result: dict) -> dict:
+    """Build the JSON record emitted for each candidate business."""
+    flagged = []
+    for r in score_result.get("flagged_reviews", []):
+        flagged.append(
+            {
+                "id": r.get("id"),
+                "rating": r.get("rating"),
+                "posted_at": r.get("posted_at"),
+                "reviewer_total_reviews": r.get("reviewer_total_reviews"),
+                "text_snippet": _snippet(r.get("text", "")),
+            }
+        )
+
+    return {
+        "query": query,
+        "score": score_result["score"],
+        "anchor_fired": score_result["anchor_fired"],
+        "rules_fired": score_result["rules_fired"],
+        "breakdown": score_result["breakdown"],
+        "counts": score_result["counts"],
+        "rating_summary": data.get("rating_summary"),
+        "flagged_reviews": flagged,
+    }
+
+
+def print_summary_table(candidates: list[dict]) -> None:
+    """Print a human-readable summary table to stdout."""
+    if not candidates:
+        print("\nNo candidates found (score < {}).".format(CANDIDATE_THRESHOLD))
+        return
+
+    header = f"\n{'#':<4} {'Score':<7} {'Rules fired':<40} {'Query'}"
+    print(header)
+    print("-" * max(len(header), 90))
+    for i, c in enumerate(candidates, 1):
+        rules = ", ".join(c["rules_fired"]) if c["rules_fired"] else "-"
+        query_display = c["query"][:60] if len(c["query"]) > 60 else c["query"]
+        print(f"{i:<4} {c['score']:<7} {rules:<40} {query_display}")
+    print(
+        f"\n{len(candidates)} candidate(s) above threshold {CANDIDATE_THRESHOLD}. "
+        "Run each through ghost.reviews for Claude verification before outreach.\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Standard (non-sweep) mode
+# ---------------------------------------------------------------------------
+
+def run_standard(
+    queries: list[str],
+    depth: int,
+    workers: int,
+    auth: str,
+    location_code: int,
+    out_path: str,
+) -> None:
+    """Pull reviews for all queries in parallel, score each, and write
+    candidates (score >= CANDIDATE_THRESHOLD) to --out."""
+
+    print(
+        f"[prospect] standard mode | businesses={len(queries)} "
+        f"depth={depth} workers={workers}",
+        file=sys.stderr,
+    )
+
+    def process_one(query: str) -> dict | None:
+        """Pull + score one business.  Returns a candidate record or None."""
+        print(f"[prospect] pulling: {query}", file=sys.stderr)
+        data = pull_business_data(auth, query, location_code, depth)
+        if data is None:
+            print(f"[prospect] SKIP (no data): {query}", file=sys.stderr)
+            return None
+        score_result = score_business(data)
+        print(
+            f"[prospect] scored: {query!r} -> {score_result['score']} "
+            f"({', '.join(score_result['rules_fired']) or 'no anchors'})",
+            file=sys.stderr,
+        )
+        if score_result["score"] >= CANDIDATE_THRESHOLD:
+            return build_candidate_record(query, data, score_result)
+        return None
+
+    candidates: list[dict] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(process_one, q): q for q in queries}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                rec = future.result()
+            except Exception as exc:
+                q = futures[future]
+                print(f"[prospect] ERROR for {q!r}: {exc}", file=sys.stderr)
+                rec = None
+            if rec is not None:
+                candidates.append(rec)
+
+    # Sort by score descending.
+    candidates.sort(key=lambda c: c["score"], reverse=True)
+
+    # Write JSON output.
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(candidates, f, indent=2)
+    print(f"[prospect] JSON written: {out_path}", file=sys.stderr)
+
+    # Write CSV alongside (same base path, .csv extension).
+    csv_path = out_path.rsplit(".", 1)[0] + ".csv"
+    _write_csv(candidates, csv_path)
+    print(f"[prospect] CSV written: {csv_path}", file=sys.stderr)
+
+    print_summary_table(candidates)
+
+
+def _write_csv(candidates: list[dict], csv_path: str) -> None:
+    """Write a flat CSV with one row per candidate for quick spreadsheet review."""
+    if not candidates:
+        return
+    fieldnames = [
+        "rank", "score", "query", "anchor_fired", "rules_fired",
+        "burst_window_negatives", "spike_window_ones",
+        "throwaway_negatives", "textless_onestar_throwaway",
+        "tightest_cluster_gap_minutes", "overall_rating", "review_count",
+        "flagged_count",
+    ]
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for i, c in enumerate(candidates, 1):
+            rs = c.get("rating_summary") or {}
+            row = {
+                "rank": i,
+                "score": c["score"],
+                "query": c["query"],
+                "anchor_fired": c["anchor_fired"],
+                "rules_fired": "|".join(c.get("rules_fired", [])),
+                **{k: c["counts"].get(k, "") for k in [
+                    "burst_window_negatives", "spike_window_ones",
+                    "throwaway_negatives", "textless_onestar_throwaway",
+                    "tightest_cluster_gap_minutes",
+                ]},
+                "overall_rating": rs.get("overall_rating", ""),
+                "review_count": rs.get("review_count", ""),
+                "flagged_count": len(c.get("flagged_reviews", [])),
+            }
+            writer.writerow(row)
+
+
+# ---------------------------------------------------------------------------
+# Depth-sweep mode
+# ---------------------------------------------------------------------------
+
+def run_depth_sweep(
+    queries: list[str],
+    workers: int,
+    auth: str,
+    location_code: int,
+    out_path: str,
+) -> None:
+    """For each business, pull reviews at multiple depths and record how the
+    score evolves.
+
+    This is a calibration experiment to determine:
+        - At what depth do attack signals first appear?
+        - Where does the score stabilise?
+
+    Output: JSON with one entry per (business, depth); readable table to stdout.
+    The results belong in /tmp or Devon's notes — never committed to the repo.
+    """
+    print(
+        f"[prospect] depth-sweep mode | businesses={len(queries)} "
+        f"depths={SWEEP_DEPTHS} workers={workers}",
+        file=sys.stderr,
+    )
+
+    # We fan out with workers threads across (query × depth) combinations.
+    # Queries are independent; sweep depths for the same query run sequentially
+    # within each worker to avoid posting many overlapping tasks for the same
+    # business at once.
+
+    sweep_results: list[dict] = []
+
+    def sweep_one(query: str) -> list[dict]:
+        """Run the full depth sweep for a single business, sequentially."""
+        rows = []
+        for depth in SWEEP_DEPTHS:
+            print(f"[prospect] sweep: {query!r} @ depth={depth}", file=sys.stderr)
+            data = pull_business_data(auth, query, location_code, depth)
+            if data is None:
+                rows.append(
+                    {
+                        "query": query,
+                        "depth": depth,
+                        "score": None,
+                        "anchor_fired": None,
+                        "rules_fired": [],
+                        "counts": {},
+                        "error": "no data / timeout",
+                    }
+                )
+                continue
+            score_result = score_business(data)
+            rows.append(
+                {
+                    "query": query,
+                    "depth": depth,
+                    "score": score_result["score"],
+                    "anchor_fired": score_result["anchor_fired"],
+                    "rules_fired": score_result["rules_fired"],
+                    "breakdown": score_result["breakdown"],
+                    "counts": score_result["counts"],
+                }
+            )
+        return rows
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(sweep_one, q): q for q in queries}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                rows = future.result()
+            except Exception as exc:
+                q = futures[future]
+                print(f"[prospect] ERROR sweeping {q!r}: {exc}", file=sys.stderr)
+                rows = []
+            sweep_results.extend(rows)
+
+    # Sort by query, then depth.
+    sweep_results.sort(key=lambda r: (r["query"], r.get("depth", 0)))
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(sweep_results, f, indent=2)
+    print(f"[prospect] sweep JSON written: {out_path}", file=sys.stderr)
+
+    _print_sweep_table(sweep_results)
+
+
+def _print_sweep_table(rows: list[dict]) -> None:
+    """Print a per-business table showing how score evolves with depth."""
+    if not rows:
+        return
+
+    # Group by query.
+    from collections import OrderedDict
+    by_query: dict[str, list[dict]] = OrderedDict()
+    for row in rows:
+        by_query.setdefault(row["query"], []).append(row)
+
+    for query, biz_rows in by_query.items():
+        print(f"\n--- {query} ---")
+        header = f"{'Depth':<8} {'Score':<7} {'Anchor':<8} {'Rules fired'}"
+        print(header)
+        print("-" * 60)
+        for r in biz_rows:
+            score_str = str(r["score"]) if r["score"] is not None else "ERR"
+            anchor_str = str(r.get("anchor_fired", "")) if r.get("anchor_fired") is not None else "ERR"
+            rules_str = ", ".join(r.get("rules_fired", [])) or "-"
+            print(f"{r['depth']:<8} {score_str:<7} {anchor_str:<8} {rules_str}")
+
+
+# ---------------------------------------------------------------------------
+# Input parsing
+# ---------------------------------------------------------------------------
+
+def load_queries(input_path: str) -> list[str]:
+    """Read the input file: one business per line (URL or 'Name, City').
+
+    Blank lines and lines starting with '#' are skipped.
+    """
+    queries: list[str] = []
+    with open(input_path, encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            q = _derive_search_query(line)
+            if q:
+                queries.append(q)
+    return queries
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "ghost.reviews prospect pre-filter — heuristic review-signal scorer.\n\n"
+            "STAGE 1 of the two-stage detection funnel.  Reads public review metadata "
+            "via DataForSEO, scores each business against heuristic signals (BURST, SPIKE, "
+            "THROWAWAY, TEXTLESS, TIGHT_CLUSTER), and outputs candidates for Claude "
+            "verification.  No Claude calls here — use the ghost.reviews web app or "
+            "pipeline/task.py for Stage 2.\n\n"
+            "SECURITY NOTE: output files go to /tmp by default (or --out path).  "
+            "Never commit result files to the repo — the engine belongs in git, "
+            "the target list does not."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--input",
+        required=True,
+        help=(
+            "Path to a text file with one business per line.  "
+            "Each line can be a Google Maps URL or 'Business Name, City'."
+        ),
+    )
+    parser.add_argument(
+        "--depth",
+        type=int,
+        default=75,
+        help=(
+            "Number of reviews to pull per business (default: 75).  "
+            "Attack signals are often invisible at depth<50; use 75-100 for "
+            "standard runs.  Ignored in --depth-sweep mode."
+        ),
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Thread-pool size for parallel per-business pulls (default: 4).  "
+             "Network-bound; more threads = faster for large input lists.",
+    )
+    parser.add_argument(
+        "--out",
+        default="/tmp/prospect_results.json",
+        help="Output JSON path (default: /tmp/prospect_results.json).  "
+             "A .csv is also written alongside it.  Keep outputs in /tmp.",
+    )
+    parser.add_argument(
+        "--depth-sweep",
+        action="store_true",
+        help=(
+            "Calibration mode: scan each business at depths 25/50/75/100/150 "
+            "and report how score evolves.  Use this to determine at what depth "
+            "attack signals first appear and where the score stabilises."
+        ),
+    )
+    args = parser.parse_args()
+
+    # Validate credentials before doing any work.
+    auth = _get_auth_header()
+    if auth is None:
+        print(
+            "ERROR: DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD must both be set.\n"
+            "  export DATAFORSEO_LOGIN=your@email.com\n"
+            "  export DATAFORSEO_PASSWORD=your_api_password\n"
+            "Get credentials at https://app.dataforseo.com/",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Load and validate input.
+    try:
+        queries = load_queries(args.input)
+    except FileNotFoundError:
+        print(f"ERROR: input file not found: {args.input}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"ERROR reading input file: {exc}", file=sys.stderr)
+        return 1
+
+    if not queries:
+        print("ERROR: input file contains no valid business entries.", file=sys.stderr)
+        return 1
+
+    location_code = _get_location_code()
+    print(
+        f"[prospect] loaded {len(queries)} business(es) | location_code={location_code}",
+        file=sys.stderr,
+    )
+
+    if args.depth_sweep:
+        run_depth_sweep(
+            queries=queries,
+            workers=args.workers,
+            auth=auth,
+            location_code=location_code,
+            out_path=args.out,
+        )
+    else:
+        run_standard(
+            queries=queries,
+            depth=args.depth,
+            workers=args.workers,
+            auth=auth,
+            location_code=location_code,
+            out_path=args.out,
+        )
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
