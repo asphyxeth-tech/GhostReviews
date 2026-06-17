@@ -1,15 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <radialGradient id="glow" cx="50%" cy="50%" r="55%">
-      <stop offset="0%" stop-color="#c4b5fd" stop-opacity="0.6"/>
-      <stop offset="60%" stop-color="#a78bfa" stop-opacity="0.16"/>
+    <!-- Near-black squircle tile with a subtle top-down lift -->
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#15151f"/>
+      <stop offset="100%" stop-color="#0a0a10"/>
+    </linearGradient>
+    <!-- Soft lavender halo behind the orb -->
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#c4b5fd" stop-opacity="0.55"/>
+      <stop offset="55%" stop-color="#a78bfa" stop-opacity="0.18"/>
       <stop offset="100%" stop-color="#a78bfa" stop-opacity="0"/>
     </radialGradient>
+    <!-- The spectral orb: white-hot core fading to lavender -->
+    <radialGradient id="orb" cx="50%" cy="42%" r="60%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="45%" stop-color="#e3dbff"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </radialGradient>
+    <!-- Slash gradient -->
+    <linearGradient id="slash" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#c4b5fd"/>
+    </linearGradient>
   </defs>
-  <rect width="32" height="32" rx="7" fill="#07070d"/>
-  <circle cx="16" cy="16" r="13" fill="url(#glow)"/>
-  <!-- regex-style slashes flanking the spectral orb: /●/ -->
-  <line x1="8.5" y1="22" x2="12.5" y2="10" stroke="#a78bfa" stroke-width="2.4" stroke-linecap="round"/>
-  <line x1="19.5" y1="22" x2="23.5" y2="10" stroke="#a78bfa" stroke-width="2.4" stroke-linecap="round"/>
-  <circle cx="16" cy="16" r="3" fill="#c4b5fd"/>
+
+  <!-- tile -->
+  <rect x="8" y="8" width="496" height="496" rx="120" fill="url(#tile)" stroke="#2d2747" stroke-width="2"/>
+
+  <!-- glow behind the orb (sits under the slashes so they read as lit) -->
+  <circle cx="256" cy="261" r="150" fill="url(#halo)"/>
+
+  <!-- regex-style slashes flanking the orb: /(orb)/ -->
+  <g stroke="url(#slash)" stroke-width="30" stroke-linecap="round" fill="none">
+    <line x1="142" y1="360" x2="190" y2="162"/>
+    <line x1="322" y1="360" x2="370" y2="162"/>
+  </g>
+
+  <!-- orb -->
+  <circle cx="256" cy="261" r="62" fill="url(#orb)"/>
 </svg>
