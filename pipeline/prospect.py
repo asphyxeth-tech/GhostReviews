@@ -3,7 +3,7 @@
 This is STAGE ONE of the two-stage review-bombing detection funnel:
 
     Stage 1 (this script): cheap heuristic pre-filter.
-        Reads public review metadata via DataForSEO.  Scores each business
+        Reads public review metadata via Outscraper.  Scores each business
         against a set of lightweight signals.  Outputs a short candidate list
         (score >= 50) for human review.  NO Claude calls here.
 
@@ -22,12 +22,15 @@ think might be under attack) do NOT.  Committing a named-business list would
 effectively publish "we suspect these businesses are being attacked" to the
 whole internet — that is harmful and off the table.
 
-DataForSEO API notes (mirrors src/lib/dataforseo.ts):
-  - Auth: HTTP Basic, DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD env vars.
-  - Base URL: https://api.dataforseo.com/v3
-  - Reviews: task-based (POST task_post, then poll task_get/{id}).
-  - Business info / rating distribution: live/synchronous via my_business_info/live.
-  - Location: DATAFORSEO_LOCATION_CODE env (default 2840 = United States).
+Outscraper API notes (mirrors src/lib/outscraper.ts):
+  - Auth: X-API-KEY header; single env var OUTSCRAPER_API_KEY.
+  - Base URL: https://api.app.outscraper.com
+  - Reviews: async trigger-then-poll via /maps/reviews-v3 with async=true.
+  - Trigger returns {id, status, results_location}; poll results_location
+    (or /requests/{id}) every ~8 s until a place object with reviews_data
+    appears, status is Error/Failed, or POLL_BUDGET_S elapses.
+  - review_timestamp is a unix epoch in seconds (e.g. 1560692128).
+  - reviews_per_score is usually {"1": n, ...} but occasionally a string.
 
 Usage examples — see pipeline/README.md for full docs.
 """
@@ -35,7 +38,6 @@ Usage examples — see pipeline/README.md for full docs.
 from __future__ import annotations
 
 import argparse
-import base64
 import csv
 import concurrent.futures
 import json
@@ -43,6 +45,7 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from typing import Any
@@ -51,11 +54,11 @@ from typing import Any
 # Constants
 # ---------------------------------------------------------------------------
 
-BASE_URL = "https://api.dataforseo.com/v3"
-DEFAULT_LOCATION_CODE = 2840   # United States (matches dataforseo.ts)
+BASE_URL = "https://api.app.outscraper.com"
+REVIEWS_PATH = "/maps/reviews-v3"
 REQUEST_TIMEOUT_S = 25         # per HTTP call
-POLL_INTERVAL_S = 5            # how long to wait between task_get polls
-POLL_BUDGET_S = 300            # max time (5 min) to wait for a single task
+POLL_INTERVAL_S = 8            # seconds between poll attempts (~8 s, mirrors outscraper.ts)
+POLL_BUDGET_S = 300            # max time (5 min) to wait for a single async request
 
 # Depth levels used by --depth-sweep mode.
 SWEEP_DEPTHS = [25, 50, 75, 100, 150]
@@ -116,28 +119,46 @@ def _dig(obj: Any, path: list) -> Any:
     return cur
 
 
-def _to_iso(value: Any) -> str:
-    """Convert a DataForSEO timestamp string to ISO 8601.
+def _to_iso(value: Any, datetime_utc: Any = None) -> str:
+    """Convert an Outscraper timestamp to ISO 8601.
 
-    DataForSEO review timestamps look like "2024-05-05 14:09:32 +00:00".
-    Normalize the space-separated format; fall back to 'now' on failure.
+    Outscraper's review_timestamp is a unix epoch in SECONDS (e.g. 1560692128).
+    Tolerate milliseconds (>1e12) and microseconds (>1e15) by normalising to ms.
+    Falls back to the review_datetime_utc string "MM/DD/YYYY HH:MM:SS" (UTC),
+    then to 'now' on failure.
     """
     now_iso = datetime.now(timezone.utc).isoformat()
-    if not isinstance(value, str) or not value.strip():
-        return now_iso
-    normalized = value.strip().replace(" ", "T", 1)  # first space only
-    # "2024-05-05T14:09:32 +00:00" -> "2024-05-05T14:09:32+00:00"
-    normalized = normalized.replace(" ", "")
+
+    # Try numeric epoch first (seconds, ms, or us).
     try:
-        d = datetime.fromisoformat(normalized)
-        return d.isoformat()
-    except ValueError:
+        n = float(value)
+        if n > 0:
+            # Detect scale: >1e15 = microseconds, >1e12 = milliseconds, else seconds.
+            if n > 1e15:
+                ms = int(n // 1000)
+            elif n > 1e12:
+                ms = int(n)
+            else:
+                ms = int(n * 1000)
+            d = datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
+            return d.isoformat()
+    except (TypeError, ValueError, OSError, OverflowError):
         pass
-    try:
-        d = datetime.fromisoformat(value)
-        return d.isoformat()
-    except ValueError:
-        return now_iso
+
+    # Fall back to review_datetime_utc string "MM/DD/YYYY HH:MM:SS".
+    if isinstance(datetime_utc, str) and datetime_utc.strip():
+        # Convert "06/16/2019 13:35:28" -> "2019-06-16 13:35:28 UTC"
+        s = datetime_utc.strip()
+        import re as _re
+        normalized = _re.sub(r"^(\d{2})/(\d{2})/(\d{4})", r"\3-\1-\2", s)
+        try:
+            d = datetime.strptime(normalized, "%Y-%m-%d %H:%M:%S")
+            d = d.replace(tzinfo=timezone.utc)
+            return d.isoformat()
+        except ValueError:
+            pass
+
+    return now_iso
 
 
 def _parse_posted_at(iso_str: str) -> float:
@@ -159,7 +180,7 @@ def _word_count(text: str) -> int:
 
 def _derive_search_query(raw: str) -> str:
     """Turn a Google Maps URL or 'Name, City' string into a plain-text
-    search query.  Mirrors deriveSearchQuery in dataforseo.ts / task.py."""
+    search query.  Mirrors deriveSearchQuery in outscraper.ts / task.py."""
     import re
     from urllib.parse import parse_qs, unquote, urlparse
 
@@ -190,59 +211,26 @@ def _derive_search_query(raw: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# DataForSEO HTTP layer (stdlib-only, mirrors dataforseo.ts)
+# Outscraper HTTP layer (stdlib-only, mirrors outscraper.ts)
 # ---------------------------------------------------------------------------
 
-def _get_auth_header() -> str | None:
-    """Build the HTTP Basic auth header from env vars.  Returns None when
-    credentials are not configured — callers must check and fail gracefully."""
-    login = os.environ.get("DATAFORSEO_LOGIN", "").strip()
-    password = os.environ.get("DATAFORSEO_PASSWORD", "").strip()
-    if not login or not password:
-        return None
-    token = base64.b64encode(f"{login}:{password}".encode()).decode()
-    return f"Basic {token}"
+def _get_api_key() -> str | None:
+    """Read OUTSCRAPER_API_KEY from the environment.  Returns None when
+    the key is not configured — callers must check and fail gracefully."""
+    key = os.environ.get("OUTSCRAPER_API_KEY", "").strip()
+    return key if key else None
 
 
-def _get_location_code() -> int:
-    """Read DATAFORSEO_LOCATION_CODE env; default 2840 (US)."""
-    raw = os.environ.get("DATAFORSEO_LOCATION_CODE", "").strip()
-    try:
-        return int(raw)
-    except (ValueError, TypeError):
-        return DEFAULT_LOCATION_CODE
-
-
-def _dfs_post(path: str, auth: str, body: list, timeout: int = REQUEST_TIMEOUT_S) -> dict | None:
-    """POST JSON to a DataForSEO endpoint; return parsed dict or None."""
-    data = json.dumps(body).encode("utf-8")
+def _outscraper_get(url: str, api_key: str, timeout: int = REQUEST_TIMEOUT_S) -> Any:
+    """GET any Outscraper URL with X-API-KEY auth; return parsed JSON (list or
+    dict) or None on any error.  The response body may be a bare list or a dict,
+    so we return the raw parsed value rather than forcing dict."""
     req = urllib.request.Request(
-        f"{BASE_URL}{path}",
-        data=data,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": auth,
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            if resp.status < 200 or resp.status >= 300:
-                return None
-            return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError):
-        return None
-
-
-def _dfs_get(path: str, auth: str, timeout: int = REQUEST_TIMEOUT_S) -> dict | None:
-    """GET a DataForSEO endpoint; return parsed dict or None."""
-    req = urllib.request.Request(
-        f"{BASE_URL}{path}",
+        url,
         method="GET",
         headers={
             "Accept": "application/json",
-            "Authorization": auth,
+            "X-API-KEY": api_key,
         },
     )
     try:
@@ -254,174 +242,127 @@ def _dfs_get(path: str, auth: str, timeout: int = REQUEST_TIMEOUT_S) -> dict | N
         return None
 
 
-# ---------------------------------------------------------------------------
-# Business info (synchronous — rating distribution baseline)
-# ---------------------------------------------------------------------------
+def _build_reviews_url(query: str, depth: int) -> str:
+    """Build the /maps/reviews-v3 async trigger URL."""
+    params = urllib.parse.urlencode({
+        "query": query,
+        "reviewsLimit": depth,
+        "sort": "newest",
+        "language": "en",
+        "limit": 1,       # one place per query
+        "async": "true",
+    })
+    return f"{BASE_URL}{REVIEWS_PATH}?{params}"
 
-def fetch_business_info(auth: str, query: str, location_code: int) -> dict | None:
-    """Resolve the business and pull its all-time rating distribution via the
-    synchronous my_business_info/live endpoint.
 
-    Returns a dict with keys: cid, place_id, rating_summary (may be None).
-    Returns None when the business can't be resolved.
+def _find_place(resp: Any) -> dict | None:
+    """BFS-walk the Outscraper response (bare array, {data:[...]},
+    {data:[[...]]}, {status,data}, etc.) and return the first dict that
+    contains a reviews_data list — the place object.
 
-    This mirrors fetchBusinessInfo in dataforseo.ts.
+    Mirrors findPlace in outscraper.ts.
     """
-    resp = _dfs_post(
-        "/business_data/google/my_business_info/live",
-        auth,
-        [
-            {
-                "keyword": query,
-                "location_code": location_code,
-                "language_code": "en",
-                "tag": "ghost-reviews-prospect",
-            }
-        ],
-    )
-    item = _dig(resp, ["tasks", 0, "result", 0, "items", 0])
-    if item is None:
-        return None
-
-    # Extract rating distribution from the item.
-    rating_summary = None
-    overall = _dig(item, ["rating", "value"])
-    votes = _dig(item, ["rating", "votes_count"])
-    dist = _dig(item, ["rating_distribution"])
-    counts: dict[str, int] = {}
-    if isinstance(dist, dict):
-        for s in ("1", "2", "3", "4", "5"):
-            v = dist.get(s)
-            try:
-                counts[s] = int(v)
-            except (TypeError, ValueError):
-                pass
-    try:
-        overall_f = float(overall)
-    except (TypeError, ValueError):
-        overall_f = 0.0
-    try:
-        votes_i = int(votes)
-    except (TypeError, ValueError):
-        votes_i = 0
-
-    if overall_f or votes_i or counts:
-        rating_summary = {
-            "overall_rating": overall_f,
-            "review_count": votes_i,
-            "ratings_count": counts,
-        }
-
-    cid = _dig(item, ["cid"])
-    place_id = _dig(item, ["place_id"])
-    return {
-        "cid": cid if isinstance(cid, str) and cid else None,
-        "place_id": place_id if isinstance(place_id, str) and place_id else None,
-        "rating_summary": rating_summary,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Reviews (task-based — POST then poll)
-# ---------------------------------------------------------------------------
-
-def post_reviews_task(
-    auth: str,
-    identifier: dict,
-    location_code: int,
-    depth: int,
-) -> str | None:
-    """POST a reviews task; return the task UUID or None on failure.
-
-    `identifier` is one of: {"cid": "..."}, {"place_id": "..."}, or
-    {"keyword": "..."} — in that preference order (exact > fuzzy).
-
-    DataForSEO operates depth in multiples of 10; we round up before calling.
-    This mirrors postReviewsTask in dataforseo.ts.
-    """
-    # Round depth up to the nearest 10 (DataForSEO requirement).
-    depth_rounded = max(10, (depth + 9) // 10 * 10)
-    resp = _dfs_post(
-        "/business_data/google/reviews/task_post",
-        auth,
-        [
-            {
-                **identifier,
-                "location_code": location_code,
-                "language_code": "en",
-                "depth": depth_rounded,
-                "sort_by": "newest",   # chronological order — essential for fresh-attack detection
-                "tag": "ghost-reviews-prospect",
-            }
-        ],
-    )
-    task_id = _dig(resp, ["tasks", 0, "id"])
-    return task_id if isinstance(task_id, str) and task_id else None
-
-
-def poll_reviews_task(auth: str, task_id: str) -> list | None:
-    """Poll task_get until we have review items, the task finishes empty, or
-    we exhaust POLL_BUDGET_S.  Returns a list of raw DataForSEO review items
-    (may be empty) or None on timeout / hard failure.
-
-    task_get calls are free, so polling is cheap.
-    This mirrors pollReviewsTask in dataforseo.ts.
-    """
-    deadline = time.monotonic() + POLL_BUDGET_S
-    while time.monotonic() < deadline:
-        resp = _dfs_get(
-            f"/business_data/google/reviews/task_get/{task_id}",
-            auth,
-        )
-        items = _dig(resp, ["tasks", 0, "result", 0, "items"])
-        if isinstance(items, list) and items:
-            return items
-
-        # Task finished with no reviews — don't wait out the full budget.
-        status_code = _dig(resp, ["tasks", 0, "status_code"])
-        result_count = _dig(resp, ["tasks", 0, "result_count"])
-        try:
-            if int(status_code) == 20000 and int(result_count) == 0:
-                return []
-        except (TypeError, ValueError):
-            pass
-
-        time.sleep(POLL_INTERVAL_S)
+    queue: list[Any] = [resp]
+    guard = 0
+    while queue and guard < 5000:
+        guard += 1
+        cur = queue.pop(0)
+        if isinstance(cur, list):
+            for x in cur:
+                queue.append(x)
+        elif isinstance(cur, dict):
+            if isinstance(cur.get("reviews_data"), list):
+                return cur
+            for v in cur.values():
+                if isinstance(v, (dict, list)):
+                    queue.append(v)
     return None
 
 
-def map_review_items(items: list) -> list[dict]:
-    """Map raw DataForSEO review items to our internal review shape.
+def _build_rating_summary(place: dict) -> dict | None:
+    """Build the normalized rating_summary from an Outscraper place object.
+
+    Mirrors buildRatingSummary in outscraper.ts.
+    reviews_per_score is usually {"1": n, ...} but occasionally the string
+    "1: 6, 2: 0, 3: 4, ..." — handle both.
+    """
+    try:
+        overall = float(place.get("rating", 0) or 0)
+    except (TypeError, ValueError):
+        overall = 0.0
+    try:
+        count = int(place.get("reviews", 0) or 0)
+    except (TypeError, ValueError):
+        count = 0
+
+    counts: dict[str, int] = {}
+    rps = place.get("reviews_per_score")
+    if isinstance(rps, dict):
+        for s in ("1", "2", "3", "4", "5"):
+            try:
+                v = int(rps.get(s, 0) or 0)
+                counts[s] = v
+            except (TypeError, ValueError):
+                pass
+    elif isinstance(rps, str):
+        import re as _re
+        for part in rps.split(","):
+            m = _re.match(r"\s*([1-5])\s*:\s*(\d+)", part.strip())
+            if m:
+                counts[m.group(1)] = int(m.group(2))
+
+    if not overall and not count and not counts:
+        return None
+
+    return {
+        "overall_rating": overall,
+        "review_count": count,
+        "ratings_count": counts,
+    }
+
+
+def _map_reviews(place: dict) -> list[dict]:
+    """Map Outscraper reviews_data items to the normalized review shape.
 
     Fields used downstream by scoring:
         id, rating, posted_at (ISO 8601), reviewer_total_reviews, text
 
-    Mirrors mapReviewItems in dataforseo.ts.
+    Mirrors mapReviews in outscraper.ts; preserves the Outscraper field-name
+    quirks (autor_name typo, epoch timestamp).
     """
+    items = place.get("reviews_data", [])
+    if not isinstance(items, list):
+        return []
+
     out = []
     for i, item in enumerate(items):
-        rating_val = _dig(item, ["rating", "value"])
+        if not isinstance(item, dict):
+            continue
         try:
-            rating = max(1, min(5, round(float(rating_val))))
+            rating = max(1, min(5, round(float(item.get("review_rating", 0) or 0))))
         except (TypeError, ValueError):
             continue   # not a review row
 
-        posted_raw = _dig(item, ["timestamp"])
-        posted_at = _to_iso(posted_raw)
+        posted_at = _to_iso(
+            item.get("review_timestamp"),
+            item.get("review_datetime_utc"),
+        )
 
-        review_id = _dig(item, ["review_id"])
-        name = _dig(item, ["profile_name"])
-        count = _dig(item, ["reviews_count"])
-        text = _dig(item, ["review_text"])   # None for textless reviews
-
+        review_id = item.get("review_id")
+        # Outscraper uses "autor_name" (missing 'h'); also accept "author_name".
+        name = item.get("autor_name") or item.get("author_name")
+        # author_reviews_count = reviewer's lifetime review count — key fraud signal.
+        count_raw = item.get("author_reviews_count")
         try:
-            total_reviews = int(count)
+            total_reviews = int(count_raw) if count_raw is not None else 0
         except (TypeError, ValueError):
             total_reviews = 0
 
+        text = item.get("review_text")
+
         out.append(
             {
-                "id": review_id if isinstance(review_id, str) and review_id else f"dfs-{i}",
+                "id": review_id if isinstance(review_id, str) and review_id else f"outscraper-{i}",
                 "reviewer_name": name if isinstance(name, str) and name.strip() else "Anonymous",
                 "reviewer_total_reviews": total_reviews,
                 "rating": rating,
@@ -433,57 +374,80 @@ def map_review_items(items: list) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Per-business data pull
+# Per-business data pull (async: trigger then poll)
 # ---------------------------------------------------------------------------
 
 def pull_business_data(
-    auth: str,
+    api_key: str,
     query: str,
-    location_code: int,
     depth: int,
 ) -> dict | None:
-    """Resolve a business, pull its rating baseline and recent reviews.
+    """Resolve a business, pull its rating baseline and recent reviews via
+    Outscraper's async /maps/reviews-v3 endpoint.
+
+    Flow:
+        1. GET the async trigger URL → {id, status, results_location}.
+        2. Poll results_location (or /requests/{id}) every POLL_INTERVAL_S
+           until _find_place returns a place, status is Error/Failed, or
+           POLL_BUDGET_S elapses.
+        3. Map place["reviews_data"] to normalized review dicts.
+        4. Build rating_summary from place["rating"], ["reviews"],
+           ["reviews_per_score"].
 
     Returns:
         {
             "query": str,
-            "rating_summary": dict | None,  # all-time baseline
-            "reviews": list[dict],           # newest-first, up to `depth`
+            "rating_summary": dict | None,   # all-time baseline
+            "reviews": list[dict],            # newest-first, up to `depth`
         }
-    or None on failure (network error, business not found, task timeout).
-
-    The two-step process:
-        1. my_business_info/live (sync) — gives us cid/place_id + baseline.
-        2. reviews/task_post + task_get poll (async) — gives us reviews.
+    or None on failure (network error, business not found, timeout).
     """
-    info = fetch_business_info(auth, query, location_code)
+    # --- Step 1: trigger the async request ---
+    trigger_url = _build_reviews_url(query, depth)
+    trigger_resp = _outscraper_get(trigger_url, api_key)
+    if not trigger_resp:
+        return None
 
-    # Choose the most precise identifier available.
-    if info and info.get("cid"):
-        identifier = {"cid": info["cid"]}
-    elif info and info.get("place_id"):
-        identifier = {"place_id": info["place_id"]}
+    # Extract id and results_location from trigger response.
+    req_id = _dig(trigger_resp, ["id"])
+    results_loc = _dig(trigger_resp, ["results_location"])
+
+    if isinstance(results_loc, str) and results_loc:
+        poll_url = results_loc
+    elif isinstance(req_id, str) and req_id:
+        poll_url = f"{BASE_URL}/requests/{req_id}"
     else:
-        # Fall back to keyword search; may resolve the wrong business
-        # if the name is ambiguous, but it's our only option.
-        identifier = {"keyword": query}
-
-    task_id = post_reviews_task(auth, identifier, location_code, depth)
-    if not task_id:
+        # No id or results_location — maybe the sync response came back immediately.
+        place = _find_place(trigger_resp)
+        if place is not None:
+            return _assemble_result(query, place)
         return None
 
-    raw_items = poll_reviews_task(auth, task_id)
-    if raw_items is None:
-        # Timed out.
-        return None
+    # --- Step 2: poll until done ---
+    deadline = time.monotonic() + POLL_BUDGET_S
+    while time.monotonic() < deadline:
+        poll_resp = _outscraper_get(poll_url, api_key)
+        if poll_resp is not None:
+            place = _find_place(poll_resp)
+            if place is not None:
+                return _assemble_result(query, place)
+            status = _dig(poll_resp, ["status"])
+            if status in ("Error", "Failed"):
+                return None
+        time.sleep(POLL_INTERVAL_S)
 
-    reviews = map_review_items(raw_items)
-    # Sort newest-first (DataForSEO should already do this, but be safe).
+    return None   # budget exhausted
+
+
+def _assemble_result(query: str, place: dict) -> dict:
+    """Build the normalized pull_business_data return value from a place dict."""
+    reviews = _map_reviews(place)
+    # Sort newest-first (Outscraper should already do this with sort=newest,
+    # but be safe).
     reviews.sort(key=lambda r: _parse_posted_at(r["posted_at"]), reverse=True)
-
     return {
         "query": query,
-        "rating_summary": info["rating_summary"] if info else None,
+        "rating_summary": _build_rating_summary(place),
         "reviews": reviews,
     }
 
@@ -860,8 +824,7 @@ def run_standard(
     queries: list[str],
     depth: int,
     workers: int,
-    auth: str,
-    location_code: int,
+    api_key: str,
     out_path: str,
 ) -> None:
     """Pull reviews for all queries in parallel, score each, and write
@@ -876,7 +839,7 @@ def run_standard(
     def process_one(query: str) -> dict | None:
         """Pull + score one business.  Returns a candidate record or None."""
         print(f"[prospect] pulling: {query}", file=sys.stderr)
-        data = pull_business_data(auth, query, location_code, depth)
+        data = pull_business_data(api_key, query, depth)
         if data is None:
             print(f"[prospect] SKIP (no data): {query}", file=sys.stderr)
             return None
@@ -960,8 +923,7 @@ def _write_csv(candidates: list[dict], csv_path: str) -> None:
 def run_depth_sweep(
     queries: list[str],
     workers: int,
-    auth: str,
-    location_code: int,
+    api_key: str,
     out_path: str,
 ) -> None:
     """For each business, pull reviews at multiple depths and record how the
@@ -992,7 +954,7 @@ def run_depth_sweep(
         rows = []
         for depth in SWEEP_DEPTHS:
             print(f"[prospect] sweep: {query!r} @ depth={depth}", file=sys.stderr)
-            data = pull_business_data(auth, query, location_code, depth)
+            data = pull_business_data(api_key, query, depth)
             if data is None:
                 rows.append(
                     {
@@ -1094,7 +1056,7 @@ def main() -> int:
         description=(
             "ghost.reviews prospect pre-filter — heuristic review-signal scorer.\n\n"
             "STAGE 1 of the two-stage detection funnel.  Reads public review metadata "
-            "via DataForSEO, scores each business against heuristic signals (BURST, SPIKE, "
+            "via Outscraper, scores each business against heuristic signals (BURST, SPIKE, "
             "THROWAWAY, TEXTLESS, TIGHT_CLUSTER), and outputs candidates for Claude "
             "verification.  No Claude calls here — use the ghost.reviews web app or "
             "pipeline/task.py for Stage 2.\n\n"
@@ -1147,13 +1109,12 @@ def main() -> int:
     args = parser.parse_args()
 
     # Validate credentials before doing any work.
-    auth = _get_auth_header()
-    if auth is None:
+    api_key = _get_api_key()
+    if api_key is None:
         print(
-            "ERROR: DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD must both be set.\n"
-            "  export DATAFORSEO_LOGIN=your@email.com\n"
-            "  export DATAFORSEO_PASSWORD=your_api_password\n"
-            "Get credentials at https://app.dataforseo.com/",
+            "ERROR: OUTSCRAPER_API_KEY must be set.\n"
+            "  export OUTSCRAPER_API_KEY=your_api_key\n"
+            "Get your key at https://app.outscraper.com/profile",
             file=sys.stderr,
         )
         return 1
@@ -1172,9 +1133,8 @@ def main() -> int:
         print("ERROR: input file contains no valid business entries.", file=sys.stderr)
         return 1
 
-    location_code = _get_location_code()
     print(
-        f"[prospect] loaded {len(queries)} business(es) | location_code={location_code}",
+        f"[prospect] loaded {len(queries)} business(es)",
         file=sys.stderr,
     )
 
@@ -1182,8 +1142,7 @@ def main() -> int:
         run_depth_sweep(
             queries=queries,
             workers=args.workers,
-            auth=auth,
-            location_code=location_code,
+            api_key=api_key,
             out_path=args.out,
         )
     else:
@@ -1191,8 +1150,7 @@ def main() -> int:
             queries=queries,
             depth=args.depth,
             workers=args.workers,
-            auth=auth,
-            location_code=location_code,
+            api_key=api_key,
             out_path=args.out,
         )
 
