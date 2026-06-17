@@ -33,7 +33,7 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
   const { mode, business_url, generated_at, reviews_source, reviews_total, report } =
     data;
   const badge = RISK_BADGE[report.risk_level] ?? RISK_BADGE.medium;
-  // Both "dataforseo" (primary) and "nimble" (fallback) are live scrapes;
+  // Any non-mock source (outscraper / nimble) is a live scrape;
   // only "mock" is the bundled demo dataset.
   const isLive = reviews_source !== "mock";
   const sourceLabel = isLive ? "Live Google data" : "Demo dataset";

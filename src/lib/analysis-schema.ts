@@ -45,12 +45,13 @@ export const AnalyzeResponseSchema = z.object({
   mode: z.enum(["stub", "live"]),
   business_url: z.string(),
   generated_at: z.string(),
-  // Which source produced the reviews: "dataforseo" (primary) or "nimble"
+  // Which source produced the reviews: "outscraper" (primary) or "nimble"
   // (fallback) for live scrapes, "mock" when we fell back to the bundled
   // sample dataset (no scraper configured or the upstream failed).
+  // "dataforseo" is retained for back-compat with older saved scans.
   // Zod .parse() strips unknown keys, so this field must live on the
   // schema or it disappears from the response payload.
-  reviews_source: z.enum(["dataforseo", "nimble", "mock"]),
+  reviews_source: z.enum(["outscraper", "dataforseo", "nimble", "mock"]),
   // The business's all-time review count from Google (e.g. 10342) when a
   // live scrape captured it — powers the "previewed N of M total" upsell.
   // Optional so payloads without it (e.g. older Tower runs) still validate.

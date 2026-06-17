@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     const scrape = hasKey ? await getBusinessReviews(url, WEB_MAX_REVIEWS) : null;
     const haveLive = Boolean(scrape && scrape.reviews.length > 0);
     const reviews = haveLive ? scrape!.reviews : MOCK_REVIEWS;
-    const reviewsSource: "dataforseo" | "nimble" | "mock" = haveLive
+    const reviewsSource: "outscraper" | "nimble" | "mock" = haveLive
       ? scrape!.source
       : "mock";
 
