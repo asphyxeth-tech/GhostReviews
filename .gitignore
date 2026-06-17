@@ -60,3 +60,4 @@ Thumbs.db
 .idea/
 .cursor/
 .claude/local/
+.claude/worktrees/
