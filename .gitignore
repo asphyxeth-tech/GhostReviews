@@ -61,3 +61,8 @@ Thumbs.db
 .cursor/
 .claude/local/
 .claude/worktrees/
+
+# --- Local flywheel store: NEVER commit (contains target/business data) ---
+*.db
+*.sqlite
+*.sqlite3
