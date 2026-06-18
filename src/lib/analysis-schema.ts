@@ -2,6 +2,9 @@ import { z } from "zod";
 
 export const ReviewSchema = z.object({
   id: z.string(),
+  // Reviewer's Google account id (from Outscraper) when available — used by the
+  // admin flywheel for cross-business convergence. Optional; not in all sources.
+  author_id: z.string().optional(),
   reviewer_name: z.string(),
   reviewer_total_reviews: z.number().int(),
   rating: z.number().int().min(1).max(5),
