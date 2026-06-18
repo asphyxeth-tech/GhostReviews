@@ -50,6 +50,8 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any
 
+import datastore  # local module (pipeline/datastore.py) — the flywheel store
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -360,10 +362,14 @@ def _map_reviews(place: dict) -> list[dict]:
             total_reviews = 0
 
         text = item.get("review_text")
+        # autor_id (Outscraper's typo) = the reviewer's Google account id —
+        # logged into the flywheel store for cross-business convergence.
+        author_id = item.get("autor_id") or item.get("author_id")
 
         out.append(
             {
                 "id": review_id if isinstance(review_id, str) and review_id else f"outscraper-{i}",
+                "author_id": author_id if isinstance(author_id, str) else "",
                 "reviewer_name": name if isinstance(name, str) and name.strip() else "Anonymous",
                 "reviewer_total_reviews": total_reviews,
                 "rating": rating,
@@ -871,6 +877,52 @@ def _snippet(text: str, max_chars: int = 120) -> str:
     return text[:max_chars].rsplit(" ", 1)[0] + "…"
 
 
+def _build_scan_record(
+    query: str,
+    data: dict,
+    score_result: dict,
+    depth: int,
+    meta: dict[str, dict] | None = None,
+) -> dict:
+    """Build the flywheel-store row for one scanned business (candidate OR miss).
+    Captures the score + the suspicious reviews (with author_id, which powers the
+    free cross-business convergence signal).  See docs/METHODOLOGY.md."""
+    biz = (meta or {}).get(query) or {}
+    rating_summary = data.get("rating_summary") or {}
+    total_reviews = biz.get("total_reviews")
+    if total_reviews is None:
+        total_reviews = rating_summary.get("review_count")
+
+    flagged = []
+    for r in score_result.get("flagged_reviews", []):
+        txt = r.get("text") or ""
+        flagged.append(
+            {
+                "review_id": r.get("id"),
+                "author_id": r.get("author_id") or "",
+                "author_name": r.get("reviewer_name"),
+                "rating": r.get("rating"),
+                "posted_at": r.get("posted_at"),
+                "reviewer_total_reviews": r.get("reviewer_total_reviews"),
+                "textless": len(txt.strip()) == 0,
+                "text_snippet": _snippet(txt),
+            }
+        )
+
+    return {
+        "place_id": biz.get("place_id") or query,
+        "business_name": biz.get("name") or query,
+        "query": query,
+        "total_reviews": total_reviews,
+        "scan_depth": depth,
+        "prefilter_score": score_result.get("score"),
+        "anchor_fired": score_result.get("anchor_fired"),
+        "rules_fired": score_result.get("rules_fired"),
+        "counts": score_result.get("counts"),
+        "flagged_reviews": flagged,
+    }
+
+
 def build_candidate_record(query: str, data: dict, score_result: dict) -> dict:
     """Build the JSON record emitted for each candidate business."""
     flagged = []
@@ -927,13 +979,17 @@ def run_standard(
     api_key: str,
     out_path: str,
     meta: dict[str, dict] | None = None,
+    db_path: str | None = None,
 ) -> None:
     """Pull reviews for all queries in parallel, score each, and write
     candidates (score >= CANDIDATE_THRESHOLD) to --out.
 
     `meta` optionally maps a query string -> discovered business metadata
     (name, address, total_reviews, site).  When present, each candidate record
-    is enriched with it — used by discovery mode, where queries are place_ids."""
+    is enriched with it — used by discovery mode, where queries are place_ids.
+
+    `db_path`, when set, records EVERY scanned business (candidates and misses)
+    to the local flywheel store for ongoing algorithm refinement (METHODOLOGY.md)."""
 
     print(
         f"[prospect] standard mode | businesses={len(queries)} "
@@ -942,7 +998,8 @@ def run_standard(
     )
 
     def process_one(query: str) -> dict | None:
-        """Pull + score one business.  Returns a candidate record or None."""
+        """Pull + score one business.  Returns {"scan": <record>, "candidate":
+        <record or None>}, or None when the business couldn't be pulled."""
         print(f"[prospect] pulling: {query}", file=sys.stderr)
         data = pull_business_data(api_key, query, depth)
         if data is None:
@@ -954,25 +1011,35 @@ def run_standard(
             f"({', '.join(score_result['rules_fired']) or 'no anchors'})",
             file=sys.stderr,
         )
+        scan_rec = _build_scan_record(query, data, score_result, depth, meta)
+        candidate = None
         if score_result["score"] >= CANDIDATE_THRESHOLD:
-            rec = build_candidate_record(query, data, score_result)
+            candidate = build_candidate_record(query, data, score_result)
             if meta and query in meta:
-                rec["business"] = meta[query]
-            return rec
-        return None
+                candidate["business"] = meta[query]
+        return {"scan": scan_rec, "candidate": candidate}
 
+    scan_records: list[dict] = []
     candidates: list[dict] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(process_one, q): q for q in queries}
         for future in concurrent.futures.as_completed(futures):
             try:
-                rec = future.result()
+                res = future.result()
             except Exception as exc:
                 q = futures[future]
                 print(f"[prospect] ERROR for {q!r}: {exc}", file=sys.stderr)
-                rec = None
-            if rec is not None:
-                candidates.append(rec)
+                res = None
+            if res is not None:
+                scan_records.append(res["scan"])
+                if res["candidate"] is not None:
+                    candidates.append(res["candidate"])
+
+    # Record every scanned business to the local flywheel store (best-effort —
+    # never breaks a run).  This is the growing labeled dataset (METHODOLOGY.md).
+    if db_path:
+        n = datastore.record_scans(scan_records, db_path)
+        print(f"[prospect] flywheel: recorded {n} scan(s) -> {db_path}", file=sys.stderr)
 
     # Sort by score descending.
     candidates.sort(key=lambda c: c["score"], reverse=True)
@@ -1245,7 +1312,28 @@ def main() -> int:
             "attack signals first appear and where the score stabilises."
         ),
     )
+    parser.add_argument(
+        "--db",
+        default=datastore.DEFAULT_DB_PATH,
+        help=(
+            "Local flywheel store path (SQLite, default: "
+            f"{datastore.DEFAULT_DB_PATH}).  Every scanned business is recorded "
+            "for ongoing algorithm refinement.  Gitignored — never committed.  "
+            "Pass '' to disable recording."
+        ),
+    )
+    parser.add_argument(
+        "--db-stats",
+        action="store_true",
+        help="Print accumulated flywheel-store stats (incl. recurring-author "
+             "convergence) and exit.  No scan; no API key needed.",
+    )
     args = parser.parse_args()
+
+    # --db-stats: just report the store and exit (no scan, no API key needed).
+    if args.db_stats:
+        datastore.print_stats(args.db or datastore.DEFAULT_DB_PATH)
+        return 0
 
     # Exactly one input source.
     if bool(args.input) == bool(args.discover):
@@ -1320,6 +1408,7 @@ def main() -> int:
             api_key=api_key,
             out_path=args.out,
             meta=meta,
+            db_path=args.db or None,
         )
         return 0
 
@@ -1353,6 +1442,7 @@ def main() -> int:
             workers=args.workers,
             api_key=api_key,
             out_path=args.out,
+            db_path=args.db or None,
         )
 
     return 0

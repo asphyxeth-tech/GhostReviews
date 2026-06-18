@@ -202,6 +202,23 @@ From live testing: real attack signals were invisible at depth 10 but appeared c
 
 A business is a **candidate** when total score ≥ 50.  Without at least one anchor (BURST or SPIKE), the score is forced to 0 regardless of corroboration — this was the key lesson from v1 live testing.
 
+### Flywheel store (`--db`)
+
+Every run records each scanned business (candidates **and** misses) to a local SQLite store — the growing, outcome-labeled dataset we use to refine the algorithm over time (see [`docs/METHODOLOGY.md`](../docs/METHODOLOGY.md)). It also logs each suspicious reviewer's `author_id`, so the same account flagged across **multiple** businesses surfaces for free — no extra API calls.
+
+```bash
+# Recording is on by default (path: pipeline/prospect_store.db, gitignored).
+python3 pipeline/prospect.py --discover "auto repair, London, Ontario" --out /tmp/r.json
+
+# See what's accumulated — counts + recurring-author convergence (no scan, no key):
+python3 pipeline/prospect.py --db-stats
+
+# Custom store path, or disable recording entirely with --db ''
+python3 pipeline/prospect.py --input /tmp/biz.txt --db /tmp/run.db
+```
+
+The DB is **gitignored** (`*.db`) — it contains target business data and must never be committed.
+
 ### Operational rules
 
 - **Never outreach based on prospect.py output alone.**  Always run Claude verification first.
