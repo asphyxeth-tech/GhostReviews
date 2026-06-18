@@ -114,6 +114,9 @@ function mapReviews(place: Record<string, unknown>, sinceMs?: number): Review[] 
     if (sinceMs != null && Date.parse(postedAt) < sinceMs) return;
 
     const id = dig(item, ["review_id"]);
+    // Reviewer's Google account id ("autor" typo) — for the admin flywheel's
+    // cross-business convergence signal.
+    const authorId = dig(item, ["autor_id"]) ?? dig(item, ["author_id"]);
     // Reviewer name uses Outscraper's "autor" typo; accept "author" too.
     const name = dig(item, ["autor_name"]) ?? dig(item, ["author_name"]);
     // Reviewer's lifetime review count — the key fraud signal. Null-safe.
@@ -122,6 +125,7 @@ function mapReviews(place: Record<string, unknown>, sinceMs?: number): Review[] 
 
     out.push({
       id: typeof id === "string" && id ? id : `outscraper-${i}`,
+      author_id: typeof authorId === "string" ? authorId : undefined,
       reviewer_name: typeof name === "string" && name.trim() ? name : "Anonymous",
       reviewer_total_reviews: Number.isFinite(count) ? Math.trunc(count) : 0,
       rating: Math.min(5, Math.max(1, Math.round(rating))),
