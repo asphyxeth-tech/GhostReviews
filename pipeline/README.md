@@ -156,6 +156,27 @@ Output: a JSON file of candidates sorted by score, plus a `.csv` alongside it, p
 - the specific reviews that triggered each signal (id, rating, timestamp, reviewer history, text snippet)
 - the raw counts (burst window negatives, tightest cluster gap in minutes, etc.) so you can sanity-check before handing to Claude
 
+### Discovery mode (auto-generate the business list)
+
+Instead of `--input` (a list you supply), use `--discover` to **search Google Maps** for businesses by category + city, then score each — the top of the funnel in one command.
+
+```bash
+python3 pipeline/prospect.py \
+  --discover "auto repair, London, Ontario, Canada" \
+  --discover-limit 50 \
+  --region CA \
+  --min-reviews 20 \
+  --depth 75 \
+  --out /tmp/auto_london.json
+```
+
+- `--discover-limit` — how many businesses to pull (Outscraper `organizationsPerQueryLimit`, default 50).
+- `--region` — ISO-3166 alpha-2 bias (default `CA`).
+- `--min-reviews` — skip businesses below this total-review count (tiny businesses rarely host a real attack pattern; default 0).
+- Writes the full discovered list to a `*_discovered.json` sidecar beside `--out`, and the scored candidates to `--out` (each enriched with the business name / address / site).
+- Costs ~$3 / 1,000 businesses (first 500/month free) — negligible at prospecting volume.
+- `--discover` and `--input` are mutually exclusive; `--depth-sweep` is for `--input` only.
+
 ### Depth-sweep calibration mode
 
 When you want to know at what depth attack signals first appear and where the score stabilises, use `--depth-sweep`.  Instead of a candidate list it scans each business at depths 25 / 50 / 75 / 100 / 150 and prints a per-business table.
