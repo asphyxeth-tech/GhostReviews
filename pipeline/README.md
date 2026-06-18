@@ -111,7 +111,7 @@ The integration requires the following env vars on the Next.js side (set in Verc
 
 ### What it is (and is NOT)
 
-- It scores businesses on review *metadata* (timing, reviewer history, star distribution) via the DataForSEO API.  **No Claude calls.**
+- It scores businesses on review *metadata* (timing, reviewer history, star distribution) via the Outscraper API.  **No Claude calls.**
 - It is NOT a verifier.  A candidate score of ≥ 50 means "worth Claude's time", not "this is a fake attack".  Always run Claude verification before any outreach.
 - Pre-filter precision from live testing was ~33% (2 leads in 6 candidates).  That is fine and expected — improve it by making Claude verification cheaper, not the pre-filter stricter.
 
@@ -119,13 +119,11 @@ The integration requires the following env vars on the Next.js side (set in Verc
 
 No extra pip dependencies beyond what is already in `requirements.txt`.  The script uses only Python stdlib (urllib, concurrent.futures, argparse, csv, json, datetime).
 
-Set the following environment variables:
+Set the following environment variable:
 
 | Env var | Required | Notes |
 | --- | --- | --- |
-| `DATAFORSEO_LOGIN` | Yes | Your DataForSEO account email |
-| `DATAFORSEO_PASSWORD` | Yes | DataForSEO API password |
-| `DATAFORSEO_LOCATION_CODE` | No | Defaults to `2840` (United States).  E.g. `2124` = Canada, `2826` = UK |
+| `OUTSCRAPER_API_KEY` | Yes | Your Outscraper API key — get it at https://app.outscraper.com/profile |
 
 ### Input file format
 
