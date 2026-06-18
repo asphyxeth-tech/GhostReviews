@@ -56,6 +56,7 @@ from typing import Any
 
 BASE_URL = "https://api.app.outscraper.com"
 REVIEWS_PATH = "/maps/reviews-v3"
+SEARCH_PATH = "/maps/search-v3"   # business discovery (Google Maps search)
 REQUEST_TIMEOUT_S = 25         # per HTTP call
 POLL_INTERVAL_S = 8            # seconds between poll attempts (~8 s, mirrors outscraper.ts)
 POLL_BUDGET_S = 300            # max time (5 min) to wait for a single async request
@@ -453,6 +454,105 @@ def _assemble_result(query: str, place: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Business discovery (Google Maps search — generates the candidate list)
+# ---------------------------------------------------------------------------
+
+def _build_search_url(query: str, limit: int, region: str) -> str:
+    """Build the /maps/search-v3 async trigger URL for business discovery.
+
+    `organizationsPerQueryLimit` (NOT `limit`) controls how many places come
+    back; `region` is an ISO-3166 alpha-2 bias (e.g. "CA")."""
+    params = urllib.parse.urlencode({
+        "query": query,
+        "organizationsPerQueryLimit": max(1, int(limit)),
+        "language": "en",
+        "region": region,
+        "dropDuplicates": "true",
+        "async": "true",
+    })
+    return f"{BASE_URL}{SEARCH_PATH}?{params}"
+
+
+def _find_places(resp: Any) -> list[dict]:
+    """Extract the place list from a /maps/search-v3 result.  The payload is
+    {status, data: [[place, ...]]} (one inner list per input query); we send
+    one query, so places live at data[0].  Tolerates {data:[...]} and a bare
+    list too."""
+    data = _dig(resp, ["data"])
+    if isinstance(data, list) and data and isinstance(data[0], list):
+        candidates = data[0]
+    elif isinstance(data, list):
+        candidates = data
+    elif isinstance(resp, list):
+        candidates = resp
+    else:
+        candidates = []
+    return [
+        p for p in candidates
+        if isinstance(p, dict) and (p.get("place_id") or p.get("name"))
+    ]
+
+
+def _compact_place(place: dict) -> dict:
+    """Pull the human-useful fields out of a discovered place object."""
+    try:
+        total_reviews = int(place.get("reviews") or 0)
+    except (TypeError, ValueError):
+        total_reviews = 0
+    try:
+        rating = float(place.get("rating"))
+    except (TypeError, ValueError):
+        rating = None
+    return {
+        "name": place.get("name") or "",
+        # place_id is the precise identifier we'll re-resolve reviews against.
+        "place_id": place.get("place_id") or place.get("cid") or "",
+        "full_address": place.get("full_address") or "",
+        "total_reviews": total_reviews,
+        "rating": rating,
+        "type": place.get("type") or "",
+        "phone": place.get("phone") or "",
+        "site": place.get("site") or "",   # website; Outscraper field is "site"
+    }
+
+
+def discover_businesses(
+    api_key: str, query: str, limit: int, region: str
+) -> list[dict]:
+    """Search Google Maps via Outscraper for businesses matching `query`
+    (e.g. "auto repair, London, Ontario, Canada") and return their raw place
+    objects (name, place_id, reviews count, rating, site, address, ...).
+
+    Async trigger + poll, mirroring pull_business_data.  Returns [] on failure.
+    """
+    trigger_resp = _outscraper_get(_build_search_url(query, limit, region), api_key)
+    if not trigger_resp:
+        return []
+
+    req_id = _dig(trigger_resp, ["id"])
+    results_loc = _dig(trigger_resp, ["results_location"])
+    if isinstance(results_loc, str) and results_loc:
+        poll_url = results_loc
+    elif isinstance(req_id, str) and req_id:
+        poll_url = f"{BASE_URL}/requests/{req_id}"
+    else:
+        # Synchronous response came back immediately.
+        return _find_places(trigger_resp)
+
+    deadline = time.monotonic() + POLL_BUDGET_S
+    while time.monotonic() < deadline:
+        poll_resp = _outscraper_get(poll_url, api_key)
+        if poll_resp is not None:
+            places = _find_places(poll_resp)
+            if places:
+                return places
+            if _dig(poll_resp, ["status"]) in ("Error", "Failed"):
+                return []
+        time.sleep(POLL_INTERVAL_S)
+    return []
+
+
+# ---------------------------------------------------------------------------
 # Scoring (v2 — see CLAUDE.md for methodology rationale)
 # ---------------------------------------------------------------------------
 
@@ -826,9 +926,14 @@ def run_standard(
     workers: int,
     api_key: str,
     out_path: str,
+    meta: dict[str, dict] | None = None,
 ) -> None:
     """Pull reviews for all queries in parallel, score each, and write
-    candidates (score >= CANDIDATE_THRESHOLD) to --out."""
+    candidates (score >= CANDIDATE_THRESHOLD) to --out.
+
+    `meta` optionally maps a query string -> discovered business metadata
+    (name, address, total_reviews, site).  When present, each candidate record
+    is enriched with it — used by discovery mode, where queries are place_ids."""
 
     print(
         f"[prospect] standard mode | businesses={len(queries)} "
@@ -850,7 +955,10 @@ def run_standard(
             file=sys.stderr,
         )
         if score_result["score"] >= CANDIDATE_THRESHOLD:
-            return build_candidate_record(query, data, score_result)
+            rec = build_candidate_record(query, data, score_result)
+            if meta and query in meta:
+                rec["business"] = meta[query]
+            return rec
         return None
 
     candidates: list[dict] = []
@@ -887,7 +995,7 @@ def _write_csv(candidates: list[dict], csv_path: str) -> None:
     if not candidates:
         return
     fieldnames = [
-        "rank", "score", "query", "anchor_fired", "rules_fired",
+        "rank", "score", "business_name", "query", "anchor_fired", "rules_fired",
         "burst_window_negatives", "spike_window_ones",
         "throwaway_negatives", "textless_onestar_throwaway",
         "tightest_cluster_gap_minutes", "overall_rating", "review_count",
@@ -901,6 +1009,7 @@ def _write_csv(candidates: list[dict], csv_path: str) -> None:
             row = {
                 "rank": i,
                 "score": c["score"],
+                "business_name": (c.get("business") or {}).get("name", ""),
                 "query": c["query"],
                 "anchor_fired": c["anchor_fired"],
                 "rules_fired": "|".join(c.get("rules_fired", [])),
@@ -1060,6 +1169,8 @@ def main() -> int:
             "THROWAWAY, TEXTLESS, TIGHT_CLUSTER), and outputs candidates for Claude "
             "verification.  No Claude calls here — use the ghost.reviews web app or "
             "pipeline/task.py for Stage 2.\n\n"
+            "INPUT: use --input (a known business list) OR --discover (search Google "
+            "Maps for businesses by 'category, city' and score them).\n\n"
             "SECURITY NOTE: output files go to /tmp by default (or --out path).  "
             "Never commit result files to the repo — the engine belongs in git, "
             "the target list does not."
@@ -1068,11 +1179,39 @@ def main() -> int:
     )
     parser.add_argument(
         "--input",
-        required=True,
         help=(
-            "Path to a text file with one business per line.  "
-            "Each line can be a Google Maps URL or 'Business Name, City'."
+            "Path to a text file with one business per line (Google Maps URL "
+            "or 'Business Name, City').  Use this OR --discover."
         ),
+    )
+    parser.add_argument(
+        "--discover",
+        metavar="QUERY",
+        help=(
+            "Discovery mode: instead of --input, search Google Maps for "
+            "businesses matching QUERY (e.g. 'auto repair, London, Ontario, "
+            "Canada') and score each.  Use this OR --input."
+        ),
+    )
+    parser.add_argument(
+        "--discover-limit",
+        type=int,
+        default=50,
+        help="Max businesses to discover per query (default: 50).  "
+             "Maps to Outscraper organizationsPerQueryLimit.",
+    )
+    parser.add_argument(
+        "--region",
+        default="CA",
+        help="ISO-3166 alpha-2 region bias for discovery (default: CA).",
+    )
+    parser.add_argument(
+        "--min-reviews",
+        type=int,
+        default=0,
+        help="Discovery filter: skip businesses with fewer than this many "
+             "total reviews (default: 0 = keep all).  Tiny businesses rarely "
+             "host a meaningful attack pattern.",
     )
     parser.add_argument(
         "--depth",
@@ -1108,6 +1247,18 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # Exactly one input source.
+    if bool(args.input) == bool(args.discover):
+        print("ERROR: provide exactly one of --input or --discover.", file=sys.stderr)
+        return 1
+    if args.discover and args.depth_sweep:
+        print(
+            "ERROR: --depth-sweep is for --input calibration on a known set, "
+            "not --discover.",
+            file=sys.stderr,
+        )
+        return 1
+
     # Validate credentials before doing any work.
     api_key = _get_api_key()
     if api_key is None:
@@ -1119,7 +1270,60 @@ def main() -> int:
         )
         return 1
 
-    # Load and validate input.
+    # --- Discovery mode: search Maps, then score the discovered businesses ---
+    if args.discover:
+        print(
+            f"[prospect] discovering: {args.discover!r} "
+            f"(limit={args.discover_limit}, region={args.region})",
+            file=sys.stderr,
+        )
+        places = discover_businesses(
+            api_key, args.discover, args.discover_limit, args.region
+        )
+        if not places:
+            print("ERROR: discovery returned no businesses.", file=sys.stderr)
+            return 1
+        compact = [_compact_place(p) for p in places]
+        kept = [
+            p for p in compact
+            if p["place_id"] and p["total_reviews"] >= args.min_reviews
+        ]
+        print(
+            f"[prospect] discovered {len(places)}; "
+            f"{len(kept)} kept (>= {args.min_reviews} reviews)",
+            file=sys.stderr,
+        )
+        if not kept:
+            print(
+                "ERROR: no discovered businesses passed the --min-reviews filter.",
+                file=sys.stderr,
+            )
+            return 1
+        # Save the full discovered list to a sidecar (/tmp) — never committed.
+        disc_path = args.out.rsplit(".", 1)[0] + "_discovered.json"
+        try:
+            with open(disc_path, "w", encoding="utf-8") as f:
+                json.dump(kept, f, indent=2)
+            print(f"[prospect] discovered list: {disc_path}", file=sys.stderr)
+        except OSError as exc:
+            print(
+                f"[prospect] WARN: could not write discovered list: {exc}",
+                file=sys.stderr,
+            )
+        # Resolve reviews by place_id (precise); carry name/metadata for output.
+        queries = [p["place_id"] for p in kept]
+        meta = {p["place_id"]: p for p in kept}
+        run_standard(
+            queries=queries,
+            depth=args.depth,
+            workers=args.workers,
+            api_key=api_key,
+            out_path=args.out,
+            meta=meta,
+        )
+        return 0
+
+    # --- Input-file mode ---
     try:
         queries = load_queries(args.input)
     except FileNotFoundError:
@@ -1133,10 +1337,7 @@ def main() -> int:
         print("ERROR: input file contains no valid business entries.", file=sys.stderr)
         return 1
 
-    print(
-        f"[prospect] loaded {len(queries)} business(es)",
-        file=sys.stderr,
-    )
+    print(f"[prospect] loaded {len(queries)} business(es)", file=sys.stderr)
 
     if args.depth_sweep:
         run_depth_sweep(
