@@ -43,9 +43,18 @@ export async function POST(req: NextRequest) {
       reviews: scrape.reviews,
     });
 
+    const business = scrape.business ?? null;
+    const resolvedName = businessName ?? business?.name ?? null;
+
     // Persist to the flywheel (service role; best-effort — don't fail the scan).
     const sb = createSupabaseAdmin();
     if (sb) {
+      // Join each flagged review back to its direct Google link (by id) so the
+      // per-business "file" can make every flagged review clickable.
+      const linkById = new Map<string, string>();
+      for (const rv of scrape.reviews) {
+        if (rv.review_link) linkById.set(rv.id, rv.review_link);
+      }
       const flagged = result.flagged_reviews.map((r) => ({
         review_id: r.id,
         author_id: r.author_id ?? "",
@@ -55,20 +64,36 @@ export async function POST(req: NextRequest) {
         reviewer_total_reviews: r.reviewer_total_reviews,
         textless: !(r.text && r.text.trim()),
         text_snippet: (r.text || "").slice(0, 200),
+        review_link: linkById.get(r.id) ?? "",
       }));
       try {
         await sb.from("prospect_scans").insert({
           place_id: placeId,
-          business_name: businessName,
+          business_name: resolvedName,
           query: placeId,
           total_reviews:
-            totalReviewsIn ?? scrape.rating_summary?.review_count ?? null,
+            totalReviewsIn ??
+            scrape.rating_summary?.review_count ??
+            business?.total_reviews ??
+            null,
           scan_depth: depth,
           prefilter_score: result.score,
           anchor_fired: result.anchor_fired,
           rules_fired: result.rules_fired,
           counts: result.counts,
           flagged_reviews: flagged,
+          // Business "file" metadata (Phase 2). All nullable.
+          overall_rating:
+            scrape.rating_summary?.overall_rating ??
+            business?.overall_rating ??
+            null,
+          business_address: business?.address || null,
+          business_phone: business?.phone || null,
+          business_website: business?.website || null,
+          business_maps_url: business?.maps_url || null,
+          reviews_url: business?.reviews_url || null,
+          latitude: business?.latitude ?? null,
+          longitude: business?.longitude ?? null,
           scanned_by: admin.id,
         });
       } catch {
@@ -78,7 +103,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       place_id: placeId,
-      business_name: businessName,
+      business_name: resolvedName,
       reviews_source: scrape.source,
       reviews_pulled: scrape.reviews.length,
       score: result.score,
@@ -87,6 +112,10 @@ export async function POST(req: NextRequest) {
       rules_fired: result.rules_fired,
       breakdown: result.breakdown,
       counts: result.counts,
+      // Direct Google links so the dashboard can make the business name
+      // clickable (reviews page preferred, Maps as fallback).
+      reviews_url: business?.reviews_url || business?.maps_url || "",
+      maps_url: business?.maps_url || "",
       flagged_reviews: result.flagged_reviews.map((r) => ({
         id: r.id,
         rating: r.rating,

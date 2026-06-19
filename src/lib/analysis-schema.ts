@@ -10,6 +10,10 @@ export const ReviewSchema = z.object({
   rating: z.number().int().min(1).max(5),
   posted_at: z.string(),
   text: z.string(),
+  // Direct link to this review on Google (from Outscraper) when available —
+  // used by the admin per-business "file" so each flagged review is clickable.
+  // Optional; not every source provides it.
+  review_link: z.string().optional(),
 });
 export type Review = z.infer<typeof ReviewSchema>;
 
