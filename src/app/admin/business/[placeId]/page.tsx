@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { getAdminUser, createSupabaseAdmin } from "@/lib/admin";
 import { signalDef } from "@/lib/signal-defs";
 import { FilingTracker, type Filing } from "@/components/FilingTracker";
+import { CopyButton } from "@/components/CopyButton";
+import { buildVerificationPacket } from "@/lib/verification-prompt";
 
 // Per-business "file" — the on-demand deep view for one prospect. Built lazily:
 // it just reads whatever scans we've already saved for this place_id from the
@@ -34,6 +36,7 @@ type ScanRow = {
   rules_fired: string[] | null;
   total_reviews: number | null;
   overall_rating: number | null;
+  counts: Record<string, unknown> | null;
   flagged_reviews: FlaggedReview[] | null;
   business_address: string | null;
   business_phone: string | null;
@@ -129,6 +132,20 @@ export default async function BusinessFilePage({
       textless: f.textless,
     }));
 
+  // The operator-in-the-loop verification packet: paste into a flat-rate Claude
+  // chat (Max plan) to verify this lead for $0 instead of a metered API call.
+  const verificationPacket = buildVerificationPacket({
+    businessName: latest.business_name,
+    placeId: decodedPlaceId,
+    overallRating: latest.overall_rating ?? null,
+    totalReviews: latest.total_reviews ?? null,
+    prefilterScore: latest.prefilter_score ?? null,
+    rulesFired: rules,
+    scanDepth: latest.scan_depth ?? null,
+    counts: latest.counts ?? null,
+    flaggedReviews: flagged,
+  });
+
   return (
     <div className="ghost-bg min-h-screen px-6 py-8 sm:px-10">
       <div className="mx-auto max-w-6xl">
@@ -191,6 +208,11 @@ export default async function BusinessFilePage({
 
           {/* Action buttons */}
           <div className="mt-5 flex flex-wrap gap-2">
+            <CopyButton
+              text={verificationPacket}
+              label="Copy Claude verification packet"
+              title="Copy a ready-to-paste prompt to verify this lead in a Claude chat (free on your Max plan) instead of a metered API call"
+            />
             {reviewsUrl && (
               <a
                 href={reviewsUrl}
