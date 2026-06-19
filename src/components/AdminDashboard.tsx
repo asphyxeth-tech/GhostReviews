@@ -81,6 +81,15 @@ function formatFlaggedDates(flagged?: FlaggedLite[]): string {
   return first === last ? first : `${first} – ${last}`;
 }
 
+function fmtShortDate(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "—";
+  return new Date(t).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 type RecurringAuthor = {
   author_id: string;
   author_name: string;
@@ -88,9 +97,21 @@ type RecurringAuthor = {
   businesses: string[];
 };
 
+type SavedLead = {
+  place_id: string;
+  business_name: string | null;
+  prefilter_score: number;
+  rules_fired: string[];
+  flagged_count: number;
+  total_reviews: number | null;
+  scanned_at: string;
+};
+
 type Flywheel = {
   total_scans: number;
+  total_businesses: number;
   candidates: number;
+  leads: SavedLead[];
   recurring_authors: RecurringAuthor[];
 };
 
@@ -572,6 +593,84 @@ export function AdminDashboard({ email }: { email: string }) {
             </div>
           </div>
         </div>
+
+        {/* Saved leads — the persistent view, read from the flywheel so it
+            survives a reload (unlike the in-memory results table above). */}
+        {flywheel && flywheel.leads.length > 0 && (
+          <div className="mt-8 overflow-hidden rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 px-5 py-4">
+              <h2 className="font-mono text-xs uppercase tracking-[0.18em] text-[color:var(--accent)]">
+                Saved leads ({flywheel.leads.length})
+              </h2>
+              <span className="text-xs text-[color:var(--muted)]">
+                from the flywheel · {flywheel.total_businesses} businesses scanned
+                · persists across reloads
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-[color:var(--surface-2)] text-xs uppercase tracking-widest text-[color:var(--muted)]">
+                  <tr>
+                    <th className="px-3 py-3"></th>
+                    <th className="px-4 py-3">Score</th>
+                    <th className="px-4 py-3">Business</th>
+                    <th className="px-4 py-3">Signals</th>
+                    <th className="px-4 py-3 text-right">Flagged</th>
+                    <th className="px-4 py-3 text-right">Total reviews</th>
+                    <th className="px-4 py-3">Scanned</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flywheel.leads.map((l) => (
+                    <tr
+                      key={l.place_id}
+                      className="border-t border-[color:var(--border)] bg-[color:var(--accent)]/[0.06]"
+                    >
+                      <td className="px-3 py-3">
+                        <Link
+                          href={`/admin/business/${encodeURIComponent(l.place_id)}`}
+                          title="Open business file"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[color:var(--border)] bg-[color:var(--surface-2)] text-[color:var(--muted-strong)] transition hover:border-[color:var(--accent)]/50 hover:text-[color:var(--accent)]"
+                        >
+                          ↗
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3 font-semibold tabular-nums text-[color:var(--accent)]">
+                        {l.prefilter_score}
+                      </td>
+                      <td className="px-4 py-3 text-[color:var(--foreground)]">
+                        <Link
+                          href={`/admin/business/${encodeURIComponent(l.place_id)}`}
+                          className="underline decoration-[color:var(--border)] underline-offset-2 transition hover:decoration-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                        >
+                          {l.business_name || "Unknown business"}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-[color:var(--muted-strong)]">
+                        <SignalPills rules={l.rules_fired} />
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-[color:var(--muted-strong)]">
+                        {l.flagged_count}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-[color:var(--muted-strong)]">
+                        {l.total_reviews != null
+                          ? l.total_reviews.toLocaleString()
+                          : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-[color:var(--muted)]">
+                        {fmtShortDate(l.scanned_at)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="border-t border-[color:var(--border)] px-5 py-3 text-xs text-[color:var(--muted)]">
+              Your saved candidates (≥ 50), latest scan per business. Click a row
+              to open its full file. Verify with Claude before any outreach.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
