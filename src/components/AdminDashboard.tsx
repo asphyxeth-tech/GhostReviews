@@ -224,7 +224,15 @@ export function AdminDashboard({ email }: { email: string }) {
               admin
             </span>
           </div>
-          <span className="text-xs text-[color:var(--muted)]">{email}</span>
+          <div className="flex items-center gap-4 text-xs text-[color:var(--muted)]">
+            <Link
+              href="/admin/costs"
+              className="rounded-md border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-1.5 font-medium text-[color:var(--muted-strong)] transition hover:border-[color:var(--accent)]/50 hover:text-[color:var(--foreground)]"
+            >
+              Costs →
+            </Link>
+            <span>{email}</span>
+          </div>
         </header>
 
         <div className="grid gap-8 lg:grid-cols-[2fr_1fr]">
