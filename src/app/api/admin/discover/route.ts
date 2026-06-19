@@ -1,12 +1,21 @@
-// POST /api/admin/discover — admin-only. Search Google Maps (Outscraper) for
-// businesses matching a "category, city" query; returns the list to score.
+// POST /api/admin/discover — admin-only. Sweep Google Maps (Outscraper) across a
+// basket of category seeds for one city, union + dedupe, then apply the discovery
+// filters before anything gets scored. Google Maps search is keyword-gated (no
+// "all businesses in a city" mode), so the basket IS the broad net.
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminUser } from "@/lib/admin";
-import { discoverBusinesses } from "@/lib/outscraper-search";
+import {
+  discoverBusinesses,
+  type DiscoveredBusiness,
+} from "@/lib/outscraper-search";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
+
+// Bound the fan-out so one run can't balloon into dozens of searches.
+const MAX_VERTICALS = 16;
+const SEARCH_CONCURRENCY = 6;
 
 export async function POST(req: NextRequest) {
   const admin = await getAdminUser();
@@ -14,11 +23,29 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const query = typeof body.query === "string" ? body.query.trim() : "";
-    if (!query) {
-      return NextResponse.json({ error: "query is required" }, { status: 400 });
+
+    // City + a basket of vertical seeds. Back-compat: a bare `query` still works
+    // as a single search term.
+    const city =
+      (typeof body.city === "string" && body.city.trim()) ||
+      (typeof body.query === "string" && body.query.trim()) ||
+      "";
+    const verticalsRaw: string =
+      typeof body.verticals === "string" ? body.verticals : "";
+    const verticals = verticalsRaw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, MAX_VERTICALS);
+
+    if (!city && verticals.length === 0) {
+      return NextResponse.json(
+        { error: "city (or query) is required" },
+        { status: 400 },
+      );
     }
-    const limit = Number(body.limit) || 50;
+
+    const limit = Number(body.limit) || 30; // per-vertical
     const region = typeof body.region === "string" && body.region ? body.region : "CA";
 
     // Discovery filters (all optional; 0 / empty = off). These narrow the
@@ -40,8 +67,36 @@ export async function POST(req: NextRequest) {
       return Number.isFinite(ones) ? ones / b.total_reviews : 0;
     };
 
-    const businesses = await discoverBusinesses(query, { limit, region });
-    const kept = businesses.filter((b) => {
+    // Build the search terms: "<vertical>, <city>" per seed (or just the city
+    // when no basket is given).
+    const terms = verticals.length
+      ? verticals.map((v) => `${v}, ${city}`)
+      : [city];
+
+    // Fan out across the basket with a small concurrency pool; union + dedupe by
+    // place_id (first occurrence wins). They poll concurrently, so wall-clock ≈
+    // the slowest single search, not the sum.
+    const seen = new Set<string>();
+    const union: DiscoveredBusiness[] = [];
+    let next = 0;
+    async function worker() {
+      for (;;) {
+        const i = next++;
+        if (i >= terms.length) break;
+        const found = await discoverBusinesses(terms[i], { limit, region });
+        for (const b of found) {
+          if (b.place_id && !seen.has(b.place_id)) {
+            seen.add(b.place_id);
+            union.push(b);
+          }
+        }
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(SEARCH_CONCURRENCY, terms.length) }, worker),
+    );
+
+    const kept = union.filter((b) => {
       if (!b.place_id) return false;
       if (b.total_reviews < minReviews) return false;
       if (maxReviews > 0 && b.total_reviews > maxReviews) return false;
@@ -56,8 +111,9 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({
-      query,
-      discovered: businesses.length,
+      city,
+      verticals_searched: terms.length,
+      discovered: union.length,
       kept: kept.length,
       businesses: kept,
     });
