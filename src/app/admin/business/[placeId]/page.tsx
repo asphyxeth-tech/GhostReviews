@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getAdminUser, createSupabaseAdmin } from "@/lib/admin";
 import { signalDef } from "@/lib/signal-defs";
+import { FilingTracker, type Filing } from "@/components/FilingTracker";
 
 // Per-business "file" — the on-demand deep view for one prospect. Built lazily:
 // it just reads whatever scans we've already saved for this place_id from the
@@ -97,6 +98,13 @@ export default async function BusinessFilePage({
   const rows = (data ?? []) as ScanRow[];
   if (rows.length === 0) notFound();
 
+  // Existing removal filings for this business (the Phase 3 tracker).
+  const { data: filingData } = await sb
+    .from("filings")
+    .select("*")
+    .eq("place_id", decodedPlaceId);
+  const filings = (filingData ?? []) as Filing[];
+
   const latest = rows[0];
   const flagged = Array.isArray(latest.flagged_reviews)
     ? latest.flagged_reviews
@@ -106,6 +114,20 @@ export default async function BusinessFilePage({
   const reviewsUrl = latest.reviews_url || latest.business_maps_url || null;
   const mapsUrl = latest.business_maps_url || reviewsUrl;
   const embed = mapEmbedUrl(latest);
+
+  // Latest scan's flagged reviews, shaped for the filing tracker (only those
+  // with a stable review_id can be filed/tracked).
+  const trackerReviews = flagged
+    .filter((f) => typeof f.review_id === "string" && f.review_id)
+    .map((f) => ({
+      review_id: f.review_id as string,
+      author_name: f.author_name,
+      rating: f.rating ?? null,
+      posted_at: f.posted_at ?? null,
+      text_snippet: f.text_snippet ?? "",
+      review_link: f.review_link ?? "",
+      textless: f.textless,
+    }));
 
   return (
     <div className="ghost-bg min-h-screen px-6 py-8 sm:px-10">
@@ -357,6 +379,18 @@ export default async function BusinessFilePage({
           </div>
         </div>
 
+        {/* Removal filings tracker (Phase 3) */}
+        <div className="mt-6">
+          <FilingTracker
+            placeId={decodedPlaceId}
+            businessName={latest.business_name}
+            reviews={trackerReviews}
+            initialFilings={filings}
+            overallRating={latest.overall_rating ?? null}
+            totalReviews={latest.total_reviews ?? null}
+          />
+        </div>
+
         {/* Scan history — historical comparison across re-scans */}
         <div className="mt-6 overflow-hidden rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]">
           <div className="flex items-baseline justify-between px-6 py-4">
@@ -415,8 +449,8 @@ export default async function BusinessFilePage({
             </table>
           </div>
           <p className="border-t border-[color:var(--border)] px-6 py-3 text-xs text-[color:var(--muted)]">
-            Re-scan this business monthly to track movement. Filing tracker +
-            removal-impact (rating before/after) land in the next phase.
+            Re-scan this business monthly to track movement — a filed review that
+            drops out of a later scan was almost certainly removed.
           </p>
         </div>
       </div>
