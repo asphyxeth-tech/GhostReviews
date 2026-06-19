@@ -136,8 +136,11 @@ function estimateCost(businessCount: number, depth: number) {
 }
 
 export function AdminDashboard({ email }: { email: string }) {
-  const [query, setQuery] = useState("auto repair, London, Ontario, Canada");
-  const [limit, setLimit] = useState(30);
+  const [city, setCity] = useState("London, Ontario, Canada");
+  const [verticals, setVerticals] = useState(
+    "hair salon, nail salon, barber shop, auto repair, med spa, dental clinic, chiropractor, gym, tattoo shop, dog grooming",
+  );
+  const [limit, setLimit] = useState(20);
   const [minReviews, setMinReviews] = useState(20);
   // Discovery filters (0 / empty = off). maxReviews defaults to the validated
   // value ceiling; the rest are opt-in.
@@ -152,6 +155,7 @@ export function AdminDashboard({ email }: { email: string }) {
   const [lastDiscovery, setLastDiscovery] = useState<{
     discovered: number;
     kept: number;
+    verticals_searched: number;
   } | null>(null);
 
   const [businesses, setBusinesses] = useState<Business[]>([]);
@@ -186,7 +190,8 @@ export function AdminDashboard({ email }: { email: string }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query,
+          city,
+          verticals,
           limit,
           minReviews,
           maxReviews,
@@ -204,6 +209,7 @@ export function AdminDashboard({ email }: { email: string }) {
       setLastDiscovery({
         discovered: data.discovered ?? 0,
         kept: data.kept ?? (data.businesses?.length || 0),
+        verticals_searched: data.verticals_searched ?? 0,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Discovery failed.");
@@ -347,22 +353,32 @@ export function AdminDashboard({ email }: { email: string }) {
                 Prospect funnel
               </h2>
               <p className="mt-2 text-sm text-[color:var(--muted)]">
-                Discover businesses by category + city, then run the v2
+                Sweep a city across a basket of verticals, then run the v2
                 pre-filter. Candidates (score ≥ 50) get verified with Claude
                 before any outreach.
               </p>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 <label className="sm:col-span-2 text-xs text-[color:var(--muted)]">
-                  Query (category, city)
+                  City / region
                   <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-2 text-sm text-[color:var(--foreground)]"
+                  />
+                </label>
+                <label className="sm:col-span-2 text-xs text-[color:var(--muted)]">
+                  Verticals to sweep (comma-separated — Google needs a seed term;
+                  this is your broad net)
+                  <textarea
+                    value={verticals}
+                    onChange={(e) => setVerticals(e.target.value)}
+                    rows={2}
                     className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-2 text-sm text-[color:var(--foreground)]"
                   />
                 </label>
                 <label className="text-xs text-[color:var(--muted)]">
-                  Max businesses
+                  Max per vertical
                   <input
                     type="number"
                     value={limit}
@@ -469,7 +485,8 @@ export function AdminDashboard({ email }: { email: string }) {
               </div>
               {lastDiscovery && (
                 <p className="mt-2 text-xs text-[color:var(--muted)]">
-                  Kept{" "}
+                  Swept {lastDiscovery.verticals_searched} vertical
+                  {lastDiscovery.verticals_searched === 1 ? "" : "s"} · kept{" "}
                   <span className="text-[color:var(--foreground)]">
                     {lastDiscovery.kept}
                   </span>{" "}
