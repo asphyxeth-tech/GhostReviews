@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "scans": "node scripts/scans.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.99.0",
