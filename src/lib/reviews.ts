@@ -12,6 +12,7 @@ import type { RatingSummary, Review } from "./analysis-schema";
 import {
   scrapeBusinessReviews as scrapeViaOutscraper,
   type ScrapeOptions,
+  type BusinessMeta,
 } from "./outscraper";
 import { scrapeBusinessReviews as scrapeViaNimble } from "./nimble";
 
@@ -21,6 +22,9 @@ export type BusinessReviews = {
   reviews: Review[];
   rating_summary: RatingSummary | null;
   source: ReviewSource;
+  // Business-level metadata (contact info, map, Google links). Only the
+  // Outscraper path populates this; the Nimble fallback leaves it undefined.
+  business?: BusinessMeta | null;
 };
 
 export async function getBusinessReviews(

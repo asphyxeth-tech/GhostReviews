@@ -26,9 +26,27 @@ const ASYNC_TRIGGER_TIMEOUT_MS = 20000;
 const ASYNC_POLL_BUDGET_MS = 240000;
 const ASYNC_POLL_INTERVAL_MS = 8000;
 
+// Business-level metadata pulled alongside the reviews — powers the admin
+// per-business "file" (contact info, a map, the direct Google links). All
+// fields are best-effort; Outscraper doesn't always populate every one.
+export type BusinessMeta = {
+  name: string;
+  place_id: string;
+  address: string;
+  phone: string;
+  website: string;
+  maps_url: string; // Google Maps place link
+  reviews_url: string; // direct Google reviews page
+  latitude: number | null;
+  longitude: number | null;
+  overall_rating: number | null;
+  total_reviews: number | null;
+};
+
 export type OutscraperScrape = {
   reviews: Review[];
   rating_summary: RatingSummary | null;
+  business: BusinessMeta | null;
 };
 
 export type ScrapeOptions = {
@@ -122,6 +140,8 @@ function mapReviews(place: Record<string, unknown>, sinceMs?: number): Review[] 
     // Reviewer's lifetime review count — the key fraud signal. Null-safe.
     const count = Number(dig(item, ["author_reviews_count"]));
     const text = dig(item, ["review_text"]);
+    // Direct Google link to this specific review, when present.
+    const link = dig(item, ["review_link"]);
 
     out.push({
       id: typeof id === "string" && id ? id : `outscraper-${i}`,
@@ -131,6 +151,7 @@ function mapReviews(place: Record<string, unknown>, sinceMs?: number): Review[] 
       rating: Math.min(5, Math.max(1, Math.round(rating))),
       posted_at: postedAt,
       text: typeof text === "string" ? text : "",
+      review_link: typeof link === "string" && link ? link : undefined,
     });
   });
   return out;
@@ -164,6 +185,34 @@ function buildRatingSummary(place: Record<string, unknown>): RatingSummary | nul
     overall_rating: Number.isFinite(overall) ? overall : 0,
     review_count: Number.isFinite(count) ? Math.trunc(count) : 0,
     ratings_count: counts,
+  };
+}
+
+function strOf(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+function numOrNull(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Pull the business-level fields off the place object. Outscraper field names
+// vary a little by endpoint version, so we accept a couple of aliases each.
+function buildBusinessMeta(place: Record<string, unknown>): BusinessMeta {
+  const totalRaw = numOrNull(place.reviews);
+  return {
+    name: strOf(place.name),
+    place_id: strOf(place.place_id) || strOf(place.google_id),
+    address: strOf(place.full_address) || strOf(place.address),
+    phone: strOf(place.phone) || strOf(place.phone_1),
+    website: strOf(place.site),
+    maps_url: strOf(place.location_link),
+    reviews_url: strOf(place.reviews_link),
+    latitude: numOrNull(place.latitude),
+    longitude: numOrNull(place.longitude),
+    overall_rating: numOrNull(place.rating),
+    total_reviews: totalRaw != null ? Math.trunc(totalRaw) : null,
   };
 }
 
@@ -277,5 +326,9 @@ export async function scrapeBusinessReviews(
   reviews = reviews.slice(0, limit);
   if (reviews.length === 0) return null;
 
-  return { reviews, rating_summary: buildRatingSummary(place) };
+  return {
+    reviews,
+    rating_summary: buildRatingSummary(place),
+    business: buildBusinessMeta(place),
+  };
 }

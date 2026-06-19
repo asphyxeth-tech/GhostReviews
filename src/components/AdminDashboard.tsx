@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { signalDef } from "@/lib/signal-defs";
 
 type Business = {
   name: string;
@@ -12,6 +14,14 @@ type Business = {
   site: string;
 };
 
+type FlaggedLite = {
+  id: string;
+  rating: number;
+  posted_at: string;
+  reviewer_total_reviews: number;
+  text: string;
+};
+
 type ScoreResult = {
   place_id: string;
   business_name: string | null;
@@ -20,8 +30,56 @@ type ScoreResult = {
   is_candidate: boolean;
   rules_fired: string[];
   reviews_source?: string;
+  reviews_pulled?: number;
+  reviews_url?: string;
+  maps_url?: string;
+  flagged_reviews?: FlaggedLite[];
   error?: string;
 };
+
+// Hover-able signal pills (anchors highlighted, corroboration muted). The
+// native `title` gives a plain-English tooltip on hover — defined once in
+// signal-defs.ts and reused on the per-business page.
+function SignalPills({ rules }: { rules: string[] }) {
+  if (rules.length === 0) {
+    return <span className="text-[color:var(--muted)]">no anchors</span>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {rules.map((r) => {
+        const d = signalDef(r);
+        return (
+          <span
+            key={r}
+            title={d.desc}
+            className={`cursor-help rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+              d.tone === "anchor"
+                ? "border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                : "border-[color:var(--border)] bg-[color:var(--surface-2)] text-[color:var(--muted-strong)]"
+            }`}
+          >
+            {d.label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+// Compact date range of the flagged reviews (e.g. "Mar 3 – Mar 14" or "Mar 3").
+function formatFlaggedDates(flagged?: FlaggedLite[]): string {
+  if (!flagged || flagged.length === 0) return "—";
+  const times = flagged
+    .map((f) => Date.parse(f.posted_at))
+    .filter((t) => !Number.isNaN(t))
+    .sort((a, b) => a - b);
+  if (times.length === 0) return "—";
+  const fmt = (t: number) =>
+    new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const first = fmt(times[0]);
+  const last = fmt(times[times.length - 1]);
+  return first === last ? first : `${first} – ${last}`;
+}
 
 type RecurringAuthor = {
   author_id: string;
@@ -254,55 +312,95 @@ export function AdminDashboard({ email }: { email: string }) {
             {/* Results */}
             {scored.length > 0 && (
               <div className="mt-6 overflow-hidden rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-[color:var(--surface-2)] text-xs uppercase tracking-widest text-[color:var(--muted)]">
-                    <tr>
-                      <th className="px-4 py-3">Score</th>
-                      <th className="px-4 py-3">Business</th>
-                      <th className="px-4 py-3">Signals</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scored.map((r) => (
-                      <tr
-                        key={r.place_id}
-                        className={`border-t border-[color:var(--border)] ${
-                          r.is_candidate ? "bg-[color:var(--accent)]/[0.06]" : ""
-                        }`}
-                      >
-                        <td className="px-4 py-3 font-semibold tabular-nums">
-                          <span
-                            className={
-                              r.is_candidate
-                                ? "text-[color:var(--accent)]"
-                                : "text-[color:var(--muted)]"
-                            }
-                          >
-                            {r.score}
-                          </span>
-                          {r.is_candidate && (
-                            <span className="ml-2 rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] uppercase tracking-widest text-[color:var(--accent)]">
-                              lead
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-[color:var(--foreground)]">
-                          {r.business_name}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-[color:var(--muted-strong)]">
-                          {r.error
-                            ? `⚠ ${r.error}`
-                            : r.rules_fired.length > 0
-                              ? r.rules_fired.join(", ")
-                              : "no anchors"}
-                        </td>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-[color:var(--surface-2)] text-xs uppercase tracking-widest text-[color:var(--muted)]">
+                      <tr>
+                        <th className="px-3 py-3"></th>
+                        <th className="px-4 py-3">Score</th>
+                        <th className="px-4 py-3">Business</th>
+                        <th className="px-4 py-3">Signals</th>
+                        <th className="px-4 py-3 text-right">Scanned</th>
+                        <th className="px-4 py-3 text-right">Flagged</th>
+                        <th className="px-4 py-3">Dates</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {scored.map((r) => (
+                        <tr
+                          key={r.place_id}
+                          className={`border-t border-[color:var(--border)] ${
+                            r.is_candidate ? "bg-[color:var(--accent)]/[0.06]" : ""
+                          }`}
+                        >
+                          {/* Open the per-business "file" */}
+                          <td className="px-3 py-3">
+                            <Link
+                              href={`/admin/business/${encodeURIComponent(r.place_id)}`}
+                              title="Open business file"
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[color:var(--border)] bg-[color:var(--surface-2)] text-[color:var(--muted-strong)] transition hover:border-[color:var(--accent)]/50 hover:text-[color:var(--accent)]"
+                            >
+                              ↗
+                            </Link>
+                          </td>
+                          <td className="px-4 py-3 font-semibold tabular-nums">
+                            <span
+                              className={
+                                r.is_candidate
+                                  ? "text-[color:var(--accent)]"
+                                  : "text-[color:var(--muted)]"
+                              }
+                            >
+                              {r.score}
+                            </span>
+                            {r.is_candidate && (
+                              <span className="ml-2 rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] uppercase tracking-widest text-[color:var(--accent)]">
+                                lead
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-[color:var(--foreground)]">
+                            {r.reviews_url ? (
+                              <a
+                                href={r.reviews_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="Open on Google reviews"
+                                className="underline decoration-[color:var(--border)] underline-offset-2 transition hover:decoration-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                              >
+                                {r.business_name}
+                              </a>
+                            ) : (
+                              r.business_name
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-[color:var(--muted-strong)]">
+                            {r.error ? (
+                              <span className="text-[color:var(--danger)]">
+                                ⚠ {r.error}
+                              </span>
+                            ) : (
+                              <SignalPills rules={r.rules_fired} />
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right tabular-nums text-[color:var(--muted-strong)]">
+                            {r.error ? "—" : (r.reviews_pulled ?? "—")}
+                          </td>
+                          <td className="px-4 py-3 text-right tabular-nums text-[color:var(--muted-strong)]">
+                            {r.error ? "—" : (r.flagged_reviews?.length ?? 0)}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-[color:var(--muted)]">
+                            {r.error ? "—" : formatFlaggedDates(r.flagged_reviews)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
                 <p className="border-t border-[color:var(--border)] px-4 py-3 text-xs text-[color:var(--muted)]">
                   Leads (≥ 50) — verify each in the public scanner before any
-                  outreach. Every scan above is saved to the flywheel.
+                  outreach. Click ↗ to open a business&apos;s full file. Every
+                  scan above is saved to the flywheel.
                 </p>
               </div>
             )}
