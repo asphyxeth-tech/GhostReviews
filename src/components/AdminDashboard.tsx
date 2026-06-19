@@ -96,11 +96,26 @@ type Flywheel = {
 
 const CONCURRENCY = 4;
 
+// Outscraper review pricing for the spend estimate. Gross — it ignores the
+// monthly free quota, so it over-estimates slightly, which is exactly what you
+// want from a guardrail. Bump/drop this if your Outscraper volume tier changes.
+const PRICE_PER_1K_REVIEWS = 3;
+// Always pop a confirm before any score run estimated to cost more than this.
+const CONFIRM_OVER_USD = 1;
+
+function estimateCost(businessCount: number, depth: number) {
+  const reviews = Math.max(0, businessCount) * Math.max(0, depth);
+  return { reviews, cost: (reviews / 1000) * PRICE_PER_1K_REVIEWS };
+}
+
 export function AdminDashboard({ email }: { email: string }) {
   const [query, setQuery] = useState("auto repair, London, Ontario, Canada");
   const [limit, setLimit] = useState(30);
   const [minReviews, setMinReviews] = useState(20);
-  const [depth, setDepth] = useState(75);
+  // Two-tier depth: a cheap shallow pass across everything, then a deeper read
+  // only on the handful that come back as candidates.
+  const [wideDepth, setWideDepth] = useState(50);
+  const [deepDepth, setDeepDepth] = useState(100);
 
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [discovering, setDiscovering] = useState(false);
@@ -147,13 +162,33 @@ export function AdminDashboard({ email }: { email: string }) {
     }
   }
 
-  async function scoreAll() {
+  // Score a set of businesses at a given depth, gated by a spend confirm. Shared
+  // by the wide pass (everything, shallow) and the deep dive (candidates only).
+  async function runScore(
+    targets: Business[],
+    depthToUse: number,
+    clearFirst: boolean,
+  ) {
+    if (targets.length === 0) return;
+
+    // Spend guardrail: show the estimated Outscraper cost and require a confirm
+    // before anything north of a dollar actually runs.
+    const { reviews, cost } = estimateCost(targets.length, depthToUse);
+    if (cost >= CONFIRM_OVER_USD) {
+      const ok = window.confirm(
+        `This pulls about ${reviews.toLocaleString()} reviews from Outscraper ` +
+          `— roughly $${cost.toFixed(2)} (gross, before your free monthly quota).\n\n` +
+          `${targets.length} businesses × depth ${depthToUse}. Continue?`,
+      );
+      if (!ok) return;
+    }
+
     setScoring(true);
     setError(null);
-    setResults({});
-    setProgress({ done: 0, total: businesses.length });
+    if (clearFirst) setResults({});
+    setProgress({ done: 0, total: targets.length });
     let done = 0;
-    const queue = [...businesses];
+    const queue = [...targets];
 
     async function worker() {
       for (;;) {
@@ -165,7 +200,7 @@ export function AdminDashboard({ email }: { email: string }) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               place_id: b.place_id,
-              depth,
+              depth: depthToUse,
               business_name: b.name,
               total_reviews: b.total_reviews,
             }),
@@ -200,18 +235,37 @@ export function AdminDashboard({ email }: { email: string }) {
           }));
         }
         done += 1;
-        setProgress({ done, total: businesses.length });
+        setProgress({ done, total: targets.length });
       }
     }
 
     await Promise.all(
-      Array.from({ length: Math.min(CONCURRENCY, businesses.length) }, worker),
+      Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker),
     );
     setScoring(false);
     loadFlywheel();
   }
 
+  // Wide pass: every discovered business at the shallow depth.
+  async function scoreAll() {
+    await runScore(businesses, wideDepth, true);
+  }
+
+  // Deep dive: re-score only the businesses that came back as candidates, at the
+  // deeper depth — the expensive read spent only where it's earned.
+  async function deepDive() {
+    const candidates = businesses.filter(
+      (b) => results[b.place_id]?.is_candidate,
+    );
+    await runScore(candidates, deepDepth, false);
+  }
+
   const scored = Object.values(results).sort((a, b) => b.score - a.score);
+  const candidateCount = businesses.filter(
+    (b) => results[b.place_id]?.is_candidate,
+  ).length;
+  const wideEst = estimateCost(businesses.length, wideDepth);
+  const deepEst = estimateCost(candidateCount, deepDepth);
 
   return (
     <div className="ghost-bg min-h-screen px-6 py-10 sm:px-10">
@@ -276,11 +330,20 @@ export function AdminDashboard({ email }: { email: string }) {
                   />
                 </label>
                 <label className="text-xs text-[color:var(--muted)]">
-                  Scan depth (reviews)
+                  Wide depth (shallow pass)
                   <input
                     type="number"
-                    value={depth}
-                    onChange={(e) => setDepth(Number(e.target.value))}
+                    value={wideDepth}
+                    onChange={(e) => setWideDepth(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-2 text-sm text-[color:var(--foreground)]"
+                  />
+                </label>
+                <label className="text-xs text-[color:var(--muted)]">
+                  Deep depth (candidates only)
+                  <input
+                    type="number"
+                    value={deepDepth}
+                    onChange={(e) => setDeepDepth(Number(e.target.value))}
                     className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-2 text-sm text-[color:var(--foreground)]"
                   />
                 </label>
@@ -302,13 +365,29 @@ export function AdminDashboard({ email }: { email: string }) {
                   >
                     {scoring
                       ? `Scoring ${progress.done}/${progress.total}…`
-                      : `2. Score ${businesses.length}`}
+                      : `2. Score ${businesses.length} · ~$${wideEst.cost.toFixed(2)}`}
                   </button>
                 )}
-                <span className="text-xs text-[color:var(--muted)]">
-                  {businesses.length > 0 && `${businesses.length} businesses`}
-                </span>
+                {candidateCount > 0 && (
+                  <button
+                    onClick={deepDive}
+                    disabled={scoring}
+                    title="Re-scan only the candidates at the deeper depth"
+                    className="rounded-lg border border-[color:var(--border)] px-4 py-2 text-sm font-semibold text-[color:var(--muted-strong)] transition hover:border-[color:var(--accent)]/50 hover:text-[color:var(--foreground)] disabled:opacity-50"
+                  >
+                    {`3. Deep-dive ${candidateCount} · ~$${deepEst.cost.toFixed(2)}`}
+                  </button>
+                )}
               </div>
+              {businesses.length > 0 && (
+                <p className="mt-2 text-xs text-[color:var(--muted)]">
+                  Wide pass ≈ {wideEst.reviews.toLocaleString()} reviews (~$
+                  {wideEst.cost.toFixed(2)}) across {businesses.length}{" "}
+                  businesses. Estimate is gross — your first 500 reviews/month are
+                  free. You&apos;ll get a confirm before anything over $
+                  {CONFIRM_OVER_USD} runs.
+                </p>
+              )}
 
               {error && (
                 <p className="mt-4 rounded-lg border border-[color:var(--danger)]/40 bg-[color:var(--danger)]/10 px-3 py-2 text-sm text-[color:var(--danger)]">
