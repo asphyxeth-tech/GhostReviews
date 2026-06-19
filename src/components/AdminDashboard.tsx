@@ -96,9 +96,15 @@ type Flywheel = {
 
 const CONCURRENCY = 4;
 
-// Outscraper review pricing for the spend estimate. Gross — it ignores the
-// monthly free quota, so it over-estimates slightly, which is exactly what you
-// want from a guardrail. Bump/drop this if your Outscraper volume tier changes.
+// Outscraper review pricing, confirmed from their pricing page (Jun 2026):
+//   • first 500 reviews / month ......... free
+//   • 501 – 100,000 reviews ............. $3 / 1,000   ← we live here
+//   • beyond 100,000 reviews / month .... $1 / 1,000
+// Sanity check: their calculator quotes 10,000 reviews at $28.50 = 500 free +
+// 9,500 x $3/1k. We estimate at the $3/1k tier and stay GROSS (ignore the free
+// 500) so the number leans high — the safe direction for a spend guardrail. At
+// our scan volumes the $1 tier (100k+/mo) is a long way off, so we don't model
+// it yet. Update here if the volume tier changes.
 const PRICE_PER_1K_REVIEWS = 3;
 // Always pop a confirm before any score run estimated to cost more than this.
 const CONFIRM_OVER_USD = 1;
