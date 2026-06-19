@@ -32,6 +32,31 @@ export async function GET() {
 
   const rows = data ?? [];
 
+  // Latest scan per business (rows are newest-first, so the first one we see for
+  // a place_id wins). This is the deduped set the dashboard browses — re-scans
+  // collapse to the most recent result instead of piling up.
+  const latestByPlace = new Map<string, (typeof rows)[number]>();
+  for (const s of rows) {
+    const key = s.place_id || s.id;
+    if (!latestByPlace.has(key)) latestByPlace.set(key, s);
+  }
+  const businesses = [...latestByPlace.values()];
+
+  // Saved leads: the deduped candidates (score >= 50), highest first. Each one
+  // links through to its per-business "file" page, so they survive a reload.
+  const leads = businesses
+    .filter((s) => (s.prefilter_score ?? 0) >= 50)
+    .map((s) => ({
+      place_id: s.place_id,
+      business_name: s.business_name,
+      prefilter_score: s.prefilter_score ?? 0,
+      rules_fired: Array.isArray(s.rules_fired) ? (s.rules_fired as string[]) : [],
+      flagged_count: Array.isArray(s.flagged_reviews) ? s.flagged_reviews.length : 0,
+      total_reviews: s.total_reviews ?? null,
+      scanned_at: s.scanned_at,
+    }))
+    .sort((a, b) => b.prefilter_score - a.prefilter_score);
+
   // Convergence: group flagged author_ids across distinct businesses.
   const byAuthor = new Map<
     string,
@@ -69,8 +94,9 @@ export async function GET() {
 
   return NextResponse.json({
     total_scans: rows.length,
-    candidates: rows.filter((s) => (s.prefilter_score ?? 0) >= 50).length,
+    total_businesses: businesses.length,
+    candidates: leads.length,
+    leads,
     recurring_authors: recurring,
-    recent: rows.slice(0, 100),
   });
 }
