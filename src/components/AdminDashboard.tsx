@@ -139,10 +139,20 @@ export function AdminDashboard({ email }: { email: string }) {
   const [query, setQuery] = useState("auto repair, London, Ontario, Canada");
   const [limit, setLimit] = useState(30);
   const [minReviews, setMinReviews] = useState(20);
+  // Discovery filters (0 / empty = off). maxReviews defaults to the validated
+  // value ceiling; the rest are opt-in.
+  const [maxReviews, setMaxReviews] = useState(500);
+  const [maxRating, setMaxRating] = useState(0);
+  const [minOneStarPct, setMinOneStarPct] = useState(0);
+  const [excludeTypes, setExcludeTypes] = useState("");
   // Two-tier depth: a cheap shallow pass across everything, then a deeper read
   // only on the handful that come back as candidates.
   const [wideDepth, setWideDepth] = useState(50);
   const [deepDepth, setDeepDepth] = useState(100);
+  const [lastDiscovery, setLastDiscovery] = useState<{
+    discovered: number;
+    kept: number;
+  } | null>(null);
 
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [discovering, setDiscovering] = useState(false);
@@ -170,11 +180,20 @@ export function AdminDashboard({ email }: { email: string }) {
     setDiscovering(true);
     setBusinesses([]);
     setResults({});
+    setLastDiscovery(null);
     try {
       const res = await fetch("/api/admin/discover", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, limit, minReviews }),
+        body: JSON.stringify({
+          query,
+          limit,
+          minReviews,
+          maxReviews,
+          maxRating,
+          minOneStarPct,
+          excludeTypes,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -182,6 +201,10 @@ export function AdminDashboard({ email }: { email: string }) {
         return;
       }
       setBusinesses(data.businesses || []);
+      setLastDiscovery({
+        discovered: data.discovered ?? 0,
+        kept: data.kept ?? (data.businesses?.length || 0),
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Discovery failed.");
     } finally {
@@ -357,6 +380,44 @@ export function AdminDashboard({ email }: { email: string }) {
                   />
                 </label>
                 <label className="text-xs text-[color:var(--muted)]">
+                  Max reviews (0 = off)
+                  <input
+                    type="number"
+                    value={maxReviews}
+                    onChange={(e) => setMaxReviews(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-2 text-sm text-[color:var(--foreground)]"
+                  />
+                </label>
+                <label className="text-xs text-[color:var(--muted)]">
+                  Max rating (0 = off)
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={maxRating}
+                    onChange={(e) => setMaxRating(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-2 text-sm text-[color:var(--foreground)]"
+                  />
+                </label>
+                <label className="text-xs text-[color:var(--muted)]">
+                  Min 1★ share % (0 = off)
+                  <input
+                    type="number"
+                    value={minOneStarPct}
+                    onChange={(e) => setMinOneStarPct(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-2 text-sm text-[color:var(--foreground)]"
+                  />
+                </label>
+                <label className="sm:col-span-2 text-xs text-[color:var(--muted)]">
+                  Exclude categories (comma keywords, matches Google&apos;s
+                  business type)
+                  <input
+                    value={excludeTypes}
+                    onChange={(e) => setExcludeTypes(e.target.value)}
+                    placeholder="restaurant, bar, cafe, pub, grill"
+                    className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-2)] px-3 py-2 text-sm text-[color:var(--foreground)]"
+                  />
+                </label>
+                <label className="text-xs text-[color:var(--muted)]">
                   Wide depth (shallow pass)
                   <input
                     type="number"
@@ -406,8 +467,17 @@ export function AdminDashboard({ email }: { email: string }) {
                   </button>
                 )}
               </div>
-              {businesses.length > 0 && (
+              {lastDiscovery && (
                 <p className="mt-2 text-xs text-[color:var(--muted)]">
+                  Kept{" "}
+                  <span className="text-[color:var(--foreground)]">
+                    {lastDiscovery.kept}
+                  </span>{" "}
+                  of {lastDiscovery.discovered} discovered after filters.
+                </p>
+              )}
+              {businesses.length > 0 && (
+                <p className="mt-1 text-xs text-[color:var(--muted)]">
                   Wide pass ≈ {wideEst.reviews.toLocaleString()} reviews (~$
                   {wideEst.cost.toFixed(2)}) across {businesses.length}{" "}
                   businesses. Estimate is gross — your first 500 reviews/month are
