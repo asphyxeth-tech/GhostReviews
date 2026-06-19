@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { getAdminEmails } from "@/lib/admin";
 import { Wordmark } from "@/components/Wordmark";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +38,12 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
+  // Admins (ADMIN_EMAILS allowlist) get a one-click link to the prospecting
+  // dashboard; everyone else never sees it.
+  const isAdmin = Boolean(
+    user.email && getAdminEmails().includes(user.email.toLowerCase()),
+  );
+
   const { data } = await supabase
     .from("scans")
     .select(
@@ -58,6 +65,14 @@ export default async function DashboardPage() {
             <Wordmark />
           </Link>
           <div className="flex items-center gap-4 text-sm text-[color:var(--muted)]">
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className="rounded-md border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 px-3 py-1.5 text-xs font-semibold text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20"
+              >
+                Prospecting →
+              </Link>
+            )}
             <span className="hidden sm:inline">{user.email}</span>
             <form action="/auth/signout" method="post">
               <button
