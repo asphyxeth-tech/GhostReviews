@@ -5,6 +5,8 @@ import { getBusinessReviews } from "@/lib/reviews";
 import { MOCK_REVIEWS, MOCK_REPORT } from "@/lib/mock-data";
 import { AnalyzeResponseSchema, type AnalyzeResponse } from "@/lib/analysis-schema";
 import { saveScanIfAuthenticated } from "@/lib/scan-store";
+import { createSupabaseServer } from "@/lib/supabase/server";
+import { checkRateLimit, clientIp } from "@/lib/rate-limit";
 
 // With Fluid Compute (default on newer Vercel projects), Hobby allows up to
 // 300s maxDuration — the old 60s value was a self-imposed ceiling that caused
@@ -37,6 +39,21 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { url } = RequestSchema.parse(body);
 
+    // Signed-in users get the full report and skip the rate limit; anonymous
+    // visitors get a gated teaser and are throttled (abuse/cost protection).
+    let isAuthed = false;
+    const supabase = await createSupabaseServer();
+    if (supabase) {
+      const { data } = await supabase.auth.getUser();
+      isAuthed = Boolean(data.user);
+    }
+    if (!isAuthed) {
+      const limit = await checkRateLimit("analyze", clientIp(req));
+      if (!limit.ok) {
+        return NextResponse.json({ error: limit.reason }, { status: 429 });
+      }
+    }
+
     const hasKey = Boolean(process.env.ANTHROPIC_API_KEY);
     const mode: "stub" | "live" = hasKey ? "live" : "stub";
 
@@ -60,6 +77,15 @@ export async function POST(req: NextRequest) {
         )
       : MOCK_REPORT;
 
+    // Gate the deliverable for anonymous users: strip the per-review detail
+    // (reasoning + drafted removal requests) and expose only the count. Signed-
+    // in users get the full report. The gating is server-side so the API never
+    // emits the drafts to an anonymous caller.
+    const flaggedCount = report.flagged_reviews.length;
+    const visibleReport = isAuthed
+      ? report
+      : { ...report, flagged_reviews: [] };
+
     const response: AnalyzeResponse = {
       mode,
       business_url: url,
@@ -68,7 +94,9 @@ export async function POST(req: NextRequest) {
       // The business's all-time review count (for the "N of M total"
       // preview framing); null in mock mode or if the scrape lacked it.
       reviews_total: haveLive ? (scrape!.rating_summary?.review_count ?? null) : null,
-      report,
+      gated: !isAuthed,
+      flagged_count: flaggedCount,
+      report: visibleReport,
     };
 
     const validated = AnalyzeResponseSchema.parse(response);
@@ -85,9 +113,11 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    const message = err instanceof Error ? err.message : "Unknown error";
+    // Don't leak upstream/internal error detail to the browser — log it server-
+    // side and return a generic message.
+    console.error("[/api/analyze] failed:", err);
     return NextResponse.json(
-      { error: `Analysis failed: ${message}` },
+      { error: "Analysis failed — please try again." },
       { status: 500 },
     );
   }

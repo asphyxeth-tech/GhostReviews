@@ -33,6 +33,11 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
   const { mode, business_url, generated_at, reviews_source, reviews_total, report } =
     data;
   const badge = RISK_BADGE[report.risk_level] ?? RISK_BADGE.medium;
+  // For anonymous (gated) scans the flagged-review detail is withheld, so the
+  // true count comes from flagged_count rather than the (empty) array.
+  const flaggedShown = data.gated
+    ? (data.flagged_count ?? 0)
+    : report.flagged_reviews.length;
   // Any non-mock source (outscraper / nimble) is a live scrape;
   // only "mock" is the bundled demo dataset.
   const isLive = reviews_source !== "mock";
@@ -83,7 +88,7 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
           <span>
             Flagged{" "}
             <span className="text-[color:var(--foreground)]">
-              {report.flagged_reviews.length}
+              {flaggedShown}
             </span>
           </span>
           <span className="truncate">
@@ -143,9 +148,11 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
 
       <div className="mt-10">
         <h3 className="font-mono text-xs uppercase tracking-[0.18em] text-[color:var(--accent)]">
-          Flagged reviews ({report.flagged_reviews.length})
+          Flagged reviews ({flaggedShown})
         </h3>
-        {report.flagged_reviews.length === 0 ? (
+        {data.gated ? (
+          <LockedFlagged count={flaggedShown} />
+        ) : report.flagged_reviews.length === 0 ? (
           <p className="mt-6 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6 text-sm text-[color:var(--muted-strong)]">
             No reviews exhibited the fraud signals we look for. Negative
             reviews with specific, falsifiable details belong on Google.
@@ -158,6 +165,45 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Anonymous teaser: we show the count but gate the specifics (which reviews,
+ * the reasoning, and the drafted removal requests). Creating a free account
+ * unlocks the full report — that's also our lead-capture + consent step.
+ */
+function LockedFlagged({ count }: { count: number }) {
+  if (count === 0) {
+    return (
+      <p className="mt-6 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6 text-sm text-[color:var(--muted-strong)]">
+        No reviews exhibited the fraud signals we look for. Negative reviews with
+        specific, falsifiable details belong on Google.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-6 rounded-2xl border border-[color:var(--accent)]/30 bg-[color:var(--accent)]/[0.06] p-8 text-center">
+      <div className="text-3xl" aria-hidden>
+        🔒
+      </div>
+      <h4 className="mt-3 text-lg font-semibold text-[color:var(--foreground)]">
+        {count} review{count === 1 ? "" : "s"} flagged for removal
+      </h4>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-[color:var(--muted-strong)]">
+        We&apos;ve identified {count} review{count === 1 ? "" : "s"} showing
+        strong signals of inauthentic, policy-violating activity — and drafted a
+        removal request for each. Create a free account to see exactly which
+        reviews, why they&apos;re flagged, and get the ready-to-file removal
+        requests.
+      </p>
+      <a
+        href="/login"
+        className="mt-5 inline-flex items-center gap-2 rounded-lg bg-[color:var(--accent)] px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-[color:var(--accent-glow)]"
+      >
+        See the flagged reviews — free →
+      </a>
     </div>
   );
 }

@@ -10,7 +10,15 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
   const tokenHash = url.searchParams.get("token_hash");
-  const next = url.searchParams.get("next") ?? "/dashboard";
+  // Only allow same-origin local paths — block open-redirect payloads like
+  // `//evil.com`, `/\evil.com`, or fully-qualified URLs.
+  const rawNext = url.searchParams.get("next") ?? "/dashboard";
+  const next =
+    rawNext.startsWith("/") &&
+    !rawNext.startsWith("//") &&
+    !rawNext.startsWith("/\\")
+      ? rawNext
+      : "/dashboard";
 
   const redirectTo = (path: string) => NextResponse.redirect(new URL(path, url.origin));
 
