@@ -63,6 +63,12 @@ export const AnalyzeResponseSchema = z.object({
   // live scrape captured it — powers the "previewed N of M total" upsell.
   // Optional so payloads without it (e.g. older Tower runs) still validate.
   reviews_total: z.number().int().nullable().optional(),
+  // Server-side gating: when an anonymous visitor runs the free scan we strip
+  // the flagged-review detail (the paid deliverable) and set gated=true,
+  // exposing only the count via flagged_count. Signed-in users get the full
+  // report. Optional so saved/older payloads still validate.
+  gated: z.boolean().optional(),
+  flagged_count: z.number().int().optional(),
   report: AnalysisReportSchema,
 });
 export type AnalyzeResponse = z.infer<typeof AnalyzeResponseSchema>;

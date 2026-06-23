@@ -18,6 +18,8 @@ import {
   getTowerConfig,
   triggerTowerRun,
 } from "@/lib/tower";
+import { createSupabaseServer } from "@/lib/supabase/server";
+import { checkRateLimit, clientIp } from "@/lib/rate-limit";
 
 // Vercel Hobby caps Node functions at 10s by default. Triggering a
 // Tower run is normally fast, but the upstream control-plane call can
@@ -35,6 +37,24 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { url } = RequestSchema.parse(body);
+
+    // The deep audit is the most expensive path — throttle anonymous callers
+    // hard (signed-in users are exempt).
+    let isAuthed = false;
+    const supabase = await createSupabaseServer();
+    if (supabase) {
+      const { data } = await supabase.auth.getUser();
+      isAuthed = Boolean(data.user);
+    }
+    if (!isAuthed) {
+      const limit = await checkRateLimit("analyze-tower", clientIp(req), {
+        perIp: 2,
+        globalDaily: 50,
+      });
+      if (!limit.ok) {
+        return NextResponse.json({ error: limit.reason }, { status: 429 });
+      }
+    }
 
     const config = getTowerConfig();
     const run = await triggerTowerRun(config, { business_url: url });
@@ -59,9 +79,9 @@ export async function POST(req: NextRequest) {
         { status: err.status ?? 502 },
       );
     }
-    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[/api/analyze-tower] failed:", err);
     return NextResponse.json(
-      { error: `Tower trigger failed: ${message}` },
+      { error: "Could not start the deep audit — please try again." },
       { status: 500 },
     );
   }

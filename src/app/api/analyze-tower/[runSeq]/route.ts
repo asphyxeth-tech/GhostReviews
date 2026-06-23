@@ -59,15 +59,20 @@ export async function GET(
     }
 
     if (run.status !== "exited") {
+      // Fetch logs for server-side diagnostics, but don't leak raw pipeline
+      // output to the browser.
       const logs = await getTowerRunLogs(config, runSeq);
+      console.error(
+        `[tower ${runSeq}] non-clean exit (${run.status}):`,
+        logs.slice(-30).map((l) => l.content).join("\n"),
+      );
       return NextResponse.json(
         {
           terminal: true,
           status: run.status,
           run_seq: run.number,
           app_name: config.appName,
-          error: `Tower run did not exit cleanly (status=${run.status}).`,
-          tail: logs.slice(-30).map((l) => l.content),
+          error: "The deep audit didn't finish cleanly — please try again.",
         },
         { status: 502 },
       );
@@ -76,15 +81,17 @@ export async function GET(
     const logs = await getTowerRunLogs(config, runSeq);
     const result = extractResultFromLogs(logs);
     if (!result) {
+      console.error(
+        `[tower ${runSeq}] exited but no __GHOST_RESULT__ sentinel:`,
+        logs.slice(-30).map((l) => l.content).join("\n"),
+      );
       return NextResponse.json(
         {
           terminal: true,
           status: run.status,
           run_seq: run.number,
           app_name: config.appName,
-          error:
-            "Tower run exited but no __GHOST_RESULT__ sentinel line was found in the logs.",
-          tail: logs.slice(-30).map((l) => l.content),
+          error: "The deep audit finished but produced no result — please try again.",
         },
         { status: 502 },
       );
@@ -119,15 +126,17 @@ export async function GET(
       report: payload.report,
     });
     if (!validation.success) {
+      console.error(
+        `[tower ${runSeq}] output failed schema validation:`,
+        validation.error.issues,
+      );
       return NextResponse.json(
         {
           terminal: true,
           status: run.status,
           run_seq: run.number,
           app_name: config.appName,
-          error:
-            "Tower run produced output that does not match the AnalyzeResponse schema.",
-          issues: validation.error.issues,
+          error: "The deep audit produced an unexpected result — please try again.",
         },
         { status: 502 },
       );
@@ -145,9 +154,9 @@ export async function GET(
         { status: err.status ?? 502 },
       );
     }
-    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error(`[tower ${runSeq}] poll failed:`, err);
     return NextResponse.json(
-      { error: `Tower poll failed: ${message}` },
+      { error: "Couldn't check the deep audit status — please try again." },
       { status: 500 },
     );
   }
