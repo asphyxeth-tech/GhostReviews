@@ -5,9 +5,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminUser } from "@/lib/admin";
 import {
-  discoverBusinesses,
+  discoverBusinesses as discoverViaOutscraper,
   type DiscoveredBusiness,
 } from "@/lib/outscraper-search";
+import { discoverBusinesses as discoverViaGoogle } from "@/lib/google-places";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -67,6 +68,13 @@ export async function POST(req: NextRequest) {
       return Number.isFinite(ones) ? ones / b.total_reviews : 0;
     };
 
+    // Prefer the free, official Google Places API for discovery; fall back to
+    // Outscraper's Maps search if the Google key isn't configured. (Discovery is
+    // just rating + count + category — the paid Outscraper review-pull deep-dive
+    // is unchanged downstream.)
+    const useGoogle = Boolean(process.env.GOOGLE_MAPS_API_KEY);
+    const discover = useGoogle ? discoverViaGoogle : discoverViaOutscraper;
+
     // Build the search terms: "<vertical>, <city>" per seed (or just the city
     // when no basket is given).
     const terms = verticals.length
@@ -83,7 +91,7 @@ export async function POST(req: NextRequest) {
       for (;;) {
         const i = next++;
         if (i >= terms.length) break;
-        const found = await discoverBusinesses(terms[i], { limit, region });
+        const found = await discover(terms[i], { limit, region });
         for (const b of found) {
           if (b.place_id && !seen.has(b.place_id)) {
             seen.add(b.place_id);
@@ -102,7 +110,14 @@ export async function POST(req: NextRequest) {
       if (maxReviews > 0 && b.total_reviews > maxReviews) return false;
       // Rating ceiling: keep unknown ratings (don't drop on missing data).
       if (maxRating > 0 && b.rating != null && b.rating > maxRating) return false;
-      if (minOneStarPct > 0 && oneStarShare(b) * 100 < minOneStarPct) return false;
+      // 1-star share: only apply when the distribution is available (Outscraper).
+      // Google discovery doesn't return it, so this filter is skipped there.
+      if (
+        minOneStarPct > 0 &&
+        b.reviews_per_score &&
+        oneStarShare(b) * 100 < minOneStarPct
+      )
+        return false;
       if (excludeTypes.length && b.type) {
         const t = b.type.toLowerCase();
         if (excludeTypes.some((kw) => t.includes(kw))) return false;
@@ -113,6 +128,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       city,
       verticals_searched: terms.length,
+      discovery_source: useGoogle ? "google" : "outscraper",
       discovered: union.length,
       kept: kept.length,
       businesses: kept,

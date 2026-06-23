@@ -156,6 +156,7 @@ export function AdminDashboard({ email }: { email: string }) {
     discovered: number;
     kept: number;
     verticals_searched: number;
+    discovery_source?: string;
   } | null>(null);
 
   const [businesses, setBusinesses] = useState<Business[]>([]);
@@ -210,6 +211,7 @@ export function AdminDashboard({ email }: { email: string }) {
         discovered: data.discovered ?? 0,
         kept: data.kept ?? (data.businesses?.length || 0),
         verticals_searched: data.verticals_searched ?? 0,
+        discovery_source: data.discovery_source,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Discovery failed.");
@@ -486,7 +488,13 @@ export function AdminDashboard({ email }: { email: string }) {
               {lastDiscovery && (
                 <p className="mt-2 text-xs text-[color:var(--muted)]">
                   Swept {lastDiscovery.verticals_searched} vertical
-                  {lastDiscovery.verticals_searched === 1 ? "" : "s"} · kept{" "}
+                  {lastDiscovery.verticals_searched === 1 ? "" : "s"}
+                  {lastDiscovery.discovery_source === "google"
+                    ? " via Google Places (free)"
+                    : lastDiscovery.discovery_source === "outscraper"
+                      ? " via Outscraper"
+                      : ""}{" "}
+                  · kept{" "}
                   <span className="text-[color:var(--foreground)]">
                     {lastDiscovery.kept}
                   </span>{" "}
