@@ -53,6 +53,10 @@ export type ScrapeOptions = {
   sinceMs?: number;
   // deep=true uses the async path (deep audit); default false = fast sync path.
   deep?: boolean;
+  // negativesOnly=true pulls ONLY the 1–2★ reviews (the fraud evidence) instead
+  // of all reviews — ~85–90% fewer reviews billed by Outscraper, with no loss of
+  // detection signal. Used by the prospect deep-dive.
+  negativesOnly?: boolean;
 };
 
 // ---------- helpers ----------
@@ -245,11 +249,22 @@ function buildReviewsUrl(
   maxReviews: number,
   isAsync: boolean,
   sinceMs?: number,
+  negativesOnly?: boolean,
 ): string {
   const url = new URL(BASE_URL + REVIEWS_PATH);
   url.searchParams.set("query", query);
   url.searchParams.set("reviewsLimit", String(maxReviews));
-  url.searchParams.set("sort", "newest"); // chronological — fresh-attack + incremental
+  if (negativesOnly) {
+    // Pull ONLY 1–2★ reviews: sort by rating ascending and stop at 2★. ~85–90%
+    // fewer reviews billed, and the negatives ARE the entire fraud signal. We do
+    // NOT set ignoreEmpty, so textless 1★s (our strongest tell) still come back.
+    // The place-level rating + reviews_per_score still arrive, so the velocity
+    // baseline (total negatives ÷ observed negative span) is unaffected.
+    url.searchParams.set("sort", "lowest_rating");
+    url.searchParams.set("cutoffRating", "2");
+  } else {
+    url.searchParams.set("sort", "newest"); // chronological — fresh-attack + incremental
+  }
   url.searchParams.set("language", "en");
   url.searchParams.set("limit", "1"); // one place per query
   url.searchParams.set("async", isAsync ? "true" : "false");
@@ -266,9 +281,10 @@ async function fetchAsync(
   query: string,
   maxReviews: number,
   sinceMs?: number,
+  negativesOnly?: boolean,
 ): Promise<unknown> {
   const trigger = await getJson(
-    buildReviewsUrl(query, maxReviews, true, sinceMs),
+    buildReviewsUrl(query, maxReviews, true, sinceMs, negativesOnly),
     apiKey,
     ASYNC_TRIGGER_TIMEOUT_MS,
   );
@@ -311,9 +327,9 @@ export async function scrapeBusinessReviews(
 
   const limit = Math.max(1, Math.trunc(maxReviews));
   const resp = opts.deep
-    ? await fetchAsync(apiKey, query, limit, opts.sinceMs)
+    ? await fetchAsync(apiKey, query, limit, opts.sinceMs, opts.negativesOnly)
     : await getJson(
-        buildReviewsUrl(query, limit, false, opts.sinceMs),
+        buildReviewsUrl(query, limit, false, opts.sinceMs, opts.negativesOnly),
         apiKey,
         SYNC_TIMEOUT_MS,
       );

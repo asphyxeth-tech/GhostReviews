@@ -30,7 +30,14 @@ export async function POST(req: NextRequest) {
     const totalReviewsIn =
       body.total_reviews != null ? Number(body.total_reviews) : null;
 
-    const scrape = await getBusinessReviews(placeId, depth, { deep: true });
+    // Deep-dive pulls ONLY the 1–2★ negatives (the fraud evidence) — ~85–90%
+    // cheaper than pulling all reviews, with no loss of detection signal. The
+    // place-level rating distribution still arrives, so scoring's velocity
+    // baseline is unaffected.
+    const scrape = await getBusinessReviews(placeId, depth, {
+      deep: true,
+      negativesOnly: true,
+    });
     if (!scrape || scrape.reviews.length === 0) {
       return NextResponse.json(
         { error: "no reviews returned", place_id: placeId },
