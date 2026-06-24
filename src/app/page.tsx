@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { UrlAnalyzeForm } from "@/components/UrlAnalyzeForm";
 import { Wordmark } from "@/components/Wordmark";
 
@@ -203,13 +204,31 @@ export default function Home() {
               <div className="mt-1 text-xs text-[color:var(--muted)]">
                 Independent fraud-signal analysis for local businesses.
               </div>
+              <div className="mt-1 text-xs text-[color:var(--muted)]">
+                Ghost Reviews · Suite 1022, 1737 Richmond Street Unit #9, London,
+                ON N5X 3Y2, Canada
+              </div>
             </div>
-            <a
-              href="mailto:onlinedevon88@gmail.com?subject=Ghost Reviews"
-              className="text-xs text-[color:var(--muted)] transition hover:text-[color:var(--foreground)]"
-            >
-              Get in touch →
-            </a>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-[color:var(--muted)]">
+              <Link
+                href="/privacy"
+                className="transition hover:text-[color:var(--foreground)]"
+              >
+                Privacy
+              </Link>
+              <Link
+                href="/terms"
+                className="transition hover:text-[color:var(--foreground)]"
+              >
+                Terms
+              </Link>
+              <a
+                href="mailto:devon@ghostreviews.app?subject=Ghost Reviews"
+                className="transition hover:text-[color:var(--foreground)]"
+              >
+                Get in touch →
+              </a>
+            </div>
           </div>
         </div>
       </footer>
