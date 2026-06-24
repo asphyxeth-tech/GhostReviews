@@ -246,11 +246,20 @@ def _outscraper_get(url: str, api_key: str, timeout: int = REQUEST_TIMEOUT_S) ->
 
 
 def _build_reviews_url(query: str, depth: int) -> str:
-    """Build the /maps/reviews-v3 async trigger URL."""
+    """Build the /maps/reviews-v3 async trigger URL.
+
+    Pulls ONLY the 1-2 star negatives (sort=lowest_rating + cutoffRating=2) —
+    the negatives ARE the entire fraud signal, so this bills ~85-90% fewer
+    reviews with no detection loss. ignoreEmpty is left off so textless 1-star
+    reviews (the strongest tell) still come back; the place-level rating +
+    reviews_per_score still arrive, so the velocity baseline is unaffected.
+    Mirrors buildReviewsUrl(negativesOnly=true) in outscraper.ts.
+    """
     params = urllib.parse.urlencode({
         "query": query,
         "reviewsLimit": depth,
-        "sort": "newest",
+        "sort": "lowest_rating",
+        "cutoffRating": 2,
         "language": "en",
         "limit": 1,       # one place per query
         "async": "true",

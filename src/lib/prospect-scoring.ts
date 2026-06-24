@@ -75,6 +75,10 @@ function secondsBetween(a: string, b: string): number {
   return Math.abs(parsePostedAt(a) - parsePostedAt(b));
 }
 
+// Robust to negatives-only input: the baseline rate is the business's TRUE total
+// negatives (from the place-level rating distribution, which Outscraper returns
+// regardless of the review filter) divided by the observed negative span — so it
+// stays accurate whether `reviews` is a newest-sample or a negatives-only pull.
 function expectedNegativesPerWindow(
   ratingSummary: RatingSummary | null,
   reviews: ScoredReview[],
