@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { analyzeReviewsWithClaude } from "@/lib/anthropic";
-import { getBusinessReviews } from "@/lib/reviews";
-import { MOCK_REVIEWS, MOCK_REPORT } from "@/lib/mock-data";
+import { getBlendedReviews } from "@/lib/reviews";
 import { AnalyzeResponseSchema, type AnalyzeResponse } from "@/lib/analysis-schema";
 import { saveScanIfAuthenticated } from "@/lib/scan-store";
 import { createSupabaseServer } from "@/lib/supabase/server";
@@ -18,16 +17,15 @@ export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// The instant web scan is a free "preview": the most-recent reviews,
-// analyzed at medium effort. Vercel's Hobby tier hard-caps functions at
-// 60s. Live timings observed:
-//   - 100 reviews -> 62s -> HTTP 504 (failed)
-//   - 50 reviews  -> 60.5s -> 200 by 0.5s (unsafe margin)
-//   - 40 reviews  -> ~33s -> 200 (safe)
-// Cap at 40 to leave a safe margin for normal Claude latency variance.
-// The Tower pipeline does the deep "audit hundreds → all" scan with no
-// time limit — that's the paid tier (and the "Deep scan via Tower" button).
-const WEB_MAX_REVIEWS = 40;
+// The instant web scan is a free "preview". It pulls a NEGATIVES-AWARE blend
+// (see getBlendedReviews): a newest chunk for freshness + a lowest-rating chunk
+// so the 1–2★ fraud evidence is never drowned out by recent 4–5★ reviews. With
+// maxDuration=300 (Fluid Compute) the old 40-cap latency reason is stale, so we
+// pull a bit deeper to surface the depth-~50 textless-negative signals the
+// product depends on (CLAUDE.md), while keeping per-scan cost reasonable.
+// The Tower pipeline does the deep "audit hundreds → all" scan with no time
+// limit — that's the paid tier (and the "Deep scan via Tower" button).
+const WEB_MAX_REVIEWS = 60;
 const WEB_ANALYSIS_EFFORT = "medium" as const;
 
 const RequestSchema = z.object({
@@ -54,28 +52,54 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // SAFETY (no fabricated attacks): if Claude isn't configured we must NEVER
+    // analyze the bundled MOCK sample and present a canned ~72/100 "coordinated
+    // attack" as if it were the visitor's real business. That report names fake
+    // people and would terrify a real owner scanning their own profile. Return
+    // a clean "temporarily unavailable" instead. (A local-dev demo, if ever
+    // wanted, belongs behind an explicit, clearly-labeled flag — not the
+    // public default — so it can't leak to a real prospect.)
     const hasKey = Boolean(process.env.ANTHROPIC_API_KEY);
-    const mode: "stub" | "live" = hasKey ? "live" : "stub";
+    if (!hasKey) {
+      console.error("[/api/analyze] ANTHROPIC_API_KEY unset — refusing to serve a mock attack.");
+      return NextResponse.json(
+        {
+          error:
+            "Scanning is temporarily unavailable. Please try again in a little while.",
+        },
+        { status: 503 },
+      );
+    }
+    const mode: "stub" | "live" = "live";
 
-    // In stub mode the canned MOCK_REPORT flags specific review IDs from
-    // MOCK_REVIEWS — so we must NOT swap in scraped reviews there, or the UI
-    // would label a live batch with a mismatched report. Only scrape when
-    // we're actually going to analyze the batch with Claude.
-    const scrape = hasKey ? await getBusinessReviews(url, WEB_MAX_REVIEWS) : null;
+    // Negatives-aware live pull (newest + lowest-rating, deduped) so the fraud
+    // signal isn't drowned by recent 4–5★ reviews. No mock fallback here.
+    const scrape = await getBlendedReviews(url, WEB_MAX_REVIEWS);
     const haveLive = Boolean(scrape && scrape.reviews.length > 0);
-    const reviews = haveLive ? scrape!.reviews : MOCK_REVIEWS;
-    const reviewsSource: "outscraper" | "nimble" | "mock" = haveLive
-      ? scrape!.source
-      : "mock";
 
-    const report = hasKey
-      ? await analyzeReviewsWithClaude(
-          url,
-          reviews,
-          haveLive ? scrape!.rating_summary : null,
-          WEB_ANALYSIS_EFFORT,
-        )
-      : MOCK_REPORT;
+    // SAFETY (no fabricated attacks): if the live scrape came back empty (both
+    // Outscraper AND the Nimble fallback failed, or the URL didn't resolve to a
+    // real Google place), return an honest error. We do NOT analyze mock data
+    // and hand a public visitor a fake attack on their own business.
+    if (!haveLive) {
+      return NextResponse.json(
+        {
+          error:
+            "We couldn't pull reviews for that Google profile — double-check the Maps URL (or business name + city) and try again.",
+        },
+        { status: 502 },
+      );
+    }
+
+    const reviews = scrape!.reviews;
+    const reviewsSource: "outscraper" | "nimble" = scrape!.source;
+
+    const report = await analyzeReviewsWithClaude(
+      url,
+      reviews,
+      scrape!.rating_summary,
+      WEB_ANALYSIS_EFFORT,
+    );
 
     // Gate the deliverable for anonymous users: strip the per-review detail
     // (reasoning + drafted removal requests) and expose only the count. Signed-
@@ -92,8 +116,8 @@ export async function POST(req: NextRequest) {
       generated_at: new Date().toISOString(),
       reviews_source: reviewsSource,
       // The business's all-time review count (for the "N of M total"
-      // preview framing); null in mock mode or if the scrape lacked it.
-      reviews_total: haveLive ? (scrape!.rating_summary?.review_count ?? null) : null,
+      // preview framing); null if the scrape lacked it.
+      reviews_total: scrape!.rating_summary?.review_count ?? null,
       gated: !isAuthed,
       flagged_count: flaggedCount,
       report: visibleReport,

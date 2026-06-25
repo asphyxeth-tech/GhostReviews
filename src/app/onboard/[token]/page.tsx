@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createSupabaseAdmin } from "@/lib/admin";
 import { Wordmark } from "@/components/Wordmark";
@@ -14,6 +15,7 @@ type Client = {
   fee_per_removal: number;
   currency: string;
   status: string;
+  onboarding_token_expires_at: string | null;
 };
 
 function money(amount: number, currency: string): string {
@@ -31,11 +33,26 @@ export default async function OnboardPage({
 
   const { data } = await sb
     .from("clients")
-    .select("id, business_name, fee_per_removal, currency, status")
+    .select(
+      "id, business_name, fee_per_removal, currency, status, onboarding_token_expires_at",
+    )
     .eq("onboarding_token", token)
     .maybeSingle();
   const client = data as Client | null;
   if (!client) notFound();
+
+  // An already-active client (card on file) sees the all-set state, never the
+  // agreement — checked before expiry so a returning customer with an old-but-
+  // completed link still sees success rather than an "expired" wall.
+  const isActive = client.status === "active";
+
+  // Onboarding links don't live forever. An expired link can't start a Stripe
+  // session or record consent, so show a clear "expired — contact us" message
+  // instead of the agreement.
+  const isExpired =
+    !isActive &&
+    !!client.onboarding_token_expires_at &&
+    new Date(client.onboarding_token_expires_at).getTime() < Date.now();
 
   const fee = money(client.fee_per_removal, client.currency);
 
@@ -56,7 +73,7 @@ export default async function OnboardPage({
             {client.business_name ? ` for ${client.business_name}` : ""}
           </h1>
 
-          {client.status === "active" ? (
+          {isActive ? (
             <div className="mt-6 rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.06] p-6 text-sm text-[color:var(--muted-strong)]">
               <p className="text-base font-semibold text-emerald-300">
                 ✓ You&apos;re all set.
@@ -66,6 +83,31 @@ export default async function OnboardPage({
                 only ever be charged when we actually get a fake review removed —
                 which you can verify yourself on your Google profile. You can
                 contact us any time to make changes.
+              </p>
+              <p className="mt-4">
+                <Link
+                  href={`/onboard/${token}/access`}
+                  className="font-semibold text-emerald-300 hover:underline"
+                >
+                  Next: give us access so we can file for you →
+                </Link>
+              </p>
+            </div>
+          ) : isExpired ? (
+            <div className="mt-6 rounded-2xl border border-amber-500/30 bg-amber-500/[0.06] p-6 text-sm text-[color:var(--muted-strong)]">
+              <p className="text-base font-semibold text-amber-300">
+                This link has expired.
+              </p>
+              <p className="mt-2">
+                For your security, onboarding links expire after a couple of
+                weeks. Email us and we&apos;ll send you a fresh one right away:{" "}
+                <a
+                  href="mailto:devon@ghostreviews.app"
+                  className="text-[color:var(--accent)] hover:underline"
+                >
+                  devon@ghostreviews.app
+                </a>
+                .
               </p>
             </div>
           ) : (

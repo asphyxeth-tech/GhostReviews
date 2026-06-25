@@ -7,13 +7,20 @@
 // card data and don't need a client-side publishable key.
 import Stripe from "stripe";
 
+// Pin the Stripe API version explicitly so a future SDK/library bump can't
+// silently change request/response shapes underneath us. This string matches
+// the version the installed `stripe` package's TypeScript types are generated
+// against (its `LatestApiVersion`), so it type-checks cleanly. If you upgrade
+// the `stripe` package, update this to that release's pinned version.
+const STRIPE_API_VERSION = "2026-05-27.dahlia" as const;
+
 let cached: Stripe | null = null;
 
 export function getStripe(): Stripe | null {
   if (cached) return cached;
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key || !key.trim()) return null;
-  cached = new Stripe(key.trim());
+  cached = new Stripe(key.trim(), { apiVersion: STRIPE_API_VERSION });
   return cached;
 }
 

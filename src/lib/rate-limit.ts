@@ -2,22 +2,63 @@
 // existing Supabase (no new infra). Counts recent rows per IP and globally in a
 // `rate_events` table via the service role.
 //
-// Fails OPEN on any error or when unconfigured (no service key, table missing),
-// so a scan is NEVER blocked by a limiter problem — protection simply kicks in
-// once migration 0006 is applied and SUPABASE_SERVICE_ROLE_KEY is set.
+// FAIL-OPEN vs FAIL-CLOSED — the important nuance:
+//   - When the limiter is entirely UNCONFIGURED (no service key / table), we
+//     fail OPEN on EVERY bucket: a scan is never blocked just because the
+//     limiter isn't wired up yet. The documented backstop in that state is the
+//     dashboard spend caps (Anthropic / Outscraper / Stripe), not this table.
+//   - When the limiter IS configured but a query ERRORS, behavior splits by
+//     bucket. Free buckets (the public scan) fail OPEN — a transient Supabase
+//     blip shouldn't deny a free lead-gen scan. PAID buckets (the deep Tower
+//     audit, the Stripe checkout-session creator) fail CLOSED — a transient
+//     blip must NOT silently grant unlimited expensive/paid calls. That's the
+//     money leak we're closing.
 import { createSupabaseAdmin } from "./admin";
 
 const DEFAULT_PER_IP = 5; // anonymous scans per IP per window
 const DEFAULT_WINDOW_MIN = 60;
 const DEFAULT_GLOBAL_DAILY = 200; // total anonymous scans/day across all IPs
 
+// Buckets that gate an expensive or paid action. On a CONFIGURED-but-erroring
+// store these fail CLOSED (deny) instead of open, so a Supabase blip can't be
+// used to bypass the throttle on the costly paths. The callers (the Tower deep
+// audit route and the Stripe checkout route) don't need to change — we key off
+// the bucket name they already pass, so the existing call signature is intact.
+const PAID_BUCKETS = new Set(["analyze-tower", "onboard_checkout"]);
+
 export type RateResult = { ok: true } | { ok: false; reason: string };
 
-/** Best-effort client IP from Vercel's forwarding headers. */
+// Friendly denial message used when a paid-bucket query errors and we fail
+// closed. Generic on purpose — we don't leak that the limiter itself hiccuped.
+const PAID_FAIL_CLOSED_REASON =
+  "We couldn't start that just now — please try again in a moment.";
+
+/**
+ * Best-effort client IP from the proxy headers.
+ *
+ * The LEFTMOST x-forwarded-for entry is fully attacker-controlled (a client can
+ * prepend any value), so per-IP throttling keyed on it is trivially bypassed by
+ * rotating a spoofed header. On Vercel we prefer, in order:
+ *   1. `x-vercel-forwarded-for` — set by Vercel's edge to the real client IP and
+ *      not forwardable by the client; the trustworthy source.
+ *   2. the RIGHTMOST `x-forwarded-for` hop — the entry appended LAST by the
+ *      closest trusted proxy. Still better than the leftmost (client-supplied)
+ *      entry when the platform header is absent.
+ *   3. `x-real-ip`, then "unknown".
+ */
 export function clientIp(req: Request): string {
+  const vercelIp = req.headers.get("x-vercel-forwarded-for")?.trim();
+  if (vercelIp) return vercelIp;
+
   const xff = req.headers.get("x-forwarded-for") || "";
-  const first = xff.split(",")[0]?.trim();
-  return first || req.headers.get("x-real-ip") || "unknown";
+  const parts = xff
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  // Rightmost (last-appended) hop — the one closest to our edge, not the
+  // client-controlled leftmost value.
+  const last = parts.length ? parts[parts.length - 1] : "";
+  return last || req.headers.get("x-real-ip")?.trim() || "unknown";
 }
 
 export async function checkRateLimit(
@@ -29,9 +70,20 @@ export async function checkRateLimit(
   const windowMin = opts.windowMin ?? DEFAULT_WINDOW_MIN;
   const globalDaily = opts.globalDaily ?? DEFAULT_GLOBAL_DAILY;
 
+  // Is this an expensive/paid path? If so, a CONFIGURED store that errors
+  // denies the call rather than waving it through.
+  const isPaid = PAID_BUCKETS.has(bucket);
+  // What to return when a query errors on a CONFIGURED store.
+  const onQueryError: RateResult = isPaid
+    ? { ok: false, reason: PAID_FAIL_CLOSED_REASON }
+    : { ok: true };
+
   try {
     const sb = createSupabaseAdmin();
-    if (!sb) return { ok: true }; // not configured → fail open
+    // UNCONFIGURED → fail OPEN for every bucket (free or paid). Deliberate:
+    // the limiter isn't the backstop here, dashboard spend caps are. Wiring up
+    // SUPABASE_SERVICE_ROLE_KEY + migration 0006 turns real throttling on.
+    if (!sb) return { ok: true };
 
     const now = Date.now();
     const windowStart = new Date(now - windowMin * 60_000).toISOString();
@@ -45,7 +97,8 @@ export async function checkRateLimit(
         .eq("bucket", bucket)
         .eq("ip", ip)
         .gte("created_at", windowStart);
-      if (error) return { ok: true }; // table missing / error → fail open
+      // Configured-but-erroring: paid → deny, free → allow (see header note).
+      if (error) return onQueryError;
       if ((count ?? 0) >= perIp) {
         return {
           ok: false,
@@ -61,7 +114,7 @@ export async function checkRateLimit(
       .select("*", { count: "exact", head: true })
       .eq("bucket", bucket)
       .gte("created_at", dayStart);
-    if (gErr) return { ok: true };
+    if (gErr) return onQueryError;
     if ((globalCount ?? 0) >= globalDaily) {
       return {
         ok: false,
@@ -74,6 +127,11 @@ export async function checkRateLimit(
     await sb.from("rate_events").insert({ bucket, ip });
     return { ok: true };
   } catch {
-    return { ok: true }; // never block a scan on a limiter failure
+    // An UNEXPECTED throw (not a query .error) — e.g. the admin client
+    // construction itself failed. Treat like a configured-store query error:
+    // paid → deny, free → allow. If the store was actually unconfigured we'd
+    // have already returned ok above, so reaching here on a paid bucket means
+    // something genuinely broke and we should not grant the paid call.
+    return onQueryError;
   }
 }

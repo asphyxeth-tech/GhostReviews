@@ -4,11 +4,15 @@
 // status transition. Service-role writes behind the ADMIN_EMAILS gate.
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminUser, createSupabaseAdmin } from "@/lib/admin";
+import { refundRemoval } from "@/lib/billing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const STATUSES = ["drafted", "submitted", "removed", "denied"];
+// 'reinstated' = Google put a previously-removed review back. It's terminal like
+// removed/denied, and if we'd already charged the success fee for that removal
+// we refund it (handled below).
+const STATUSES = ["drafted", "submitted", "removed", "denied", "reinstated"];
 
 // Snapshot/editable columns we accept from the client (never trust arbitrary
 // column names). place_id + review_id are handled separately as the key.
@@ -110,7 +114,7 @@ export async function POST(req: NextRequest) {
     submitted_at = submitted_at ?? now;
     resolved_at = null;
   } else {
-    // removed | denied
+    // removed | denied | reinstated — all terminal: keep/stamp both timestamps.
     submitted_at = submitted_at ?? now;
     resolved_at = resolved_at ?? now;
   }
@@ -132,5 +136,17 @@ export async function POST(req: NextRequest) {
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ filing: data });
+
+  // Reinstatement → refund. If this filing is now 'reinstated' and we'd already
+  // charged a success fee for its removal, refund it. refundRemoval is a no-op
+  // when there's no succeeded charge (or it was already refunded), so this is
+  // safe to call unconditionally on a reinstatement. We surface the refund
+  // outcome but never fail the status update because of it — the operator can
+  // retry the refund from the charge state if it errored.
+  let refund: Awaited<ReturnType<typeof refundRemoval>> | undefined;
+  if (status === "reinstated" && data?.id) {
+    refund = await refundRemoval({ filingId: data.id as string });
+  }
+
+  return NextResponse.json({ filing: data, refund });
 }

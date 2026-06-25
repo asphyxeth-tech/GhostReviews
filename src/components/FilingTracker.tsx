@@ -30,12 +30,24 @@ export type Filing = {
   resolved_at?: string | null;
 };
 
+// A success-fee charge tied to a filing (one per filing). Keyed by filing_id in
+// the UI so a row can show whether/how it was billed.
+export type Charge = {
+  id?: string;
+  filing_id: string;
+  status: string; // pending | succeeded | failed | refunded
+  amount_minor?: number | null;
+  currency?: string | null;
+  last_error?: string | null;
+};
+
 const STATUS_OPTIONS = [
   { value: "", label: "Not filed" },
   { value: "drafted", label: "Drafted" },
   { value: "submitted", label: "Submitted" },
   { value: "removed", label: "Removed ✓" },
   { value: "denied", label: "Denied" },
+  { value: "reinstated", label: "Reinstated ↩" },
 ];
 
 const REASONS = [
@@ -53,7 +65,24 @@ const STATUS_TONE: Record<string, string> = {
   submitted: "bg-amber-500/15 text-amber-300 border-amber-500/30",
   removed: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
   denied: "bg-[color:var(--danger)]/15 text-[color:var(--danger)] border-[color:var(--danger)]/30",
+  reinstated: "bg-sky-500/15 text-sky-300 border-sky-500/30",
 };
+
+// Visual tone for the charge badge, by charge status.
+const CHARGE_TONE: Record<string, string> = {
+  pending: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+  succeeded: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  failed: "bg-[color:var(--danger)]/15 text-[color:var(--danger)] border-[color:var(--danger)]/30",
+  refunded: "bg-sky-500/15 text-sky-300 border-sky-500/30",
+};
+
+function fmtCharge(c: Charge): string {
+  const amt =
+    c.amount_minor != null && c.currency
+      ? ` ${c.currency.toUpperCase()} $${(c.amount_minor / 100).toFixed(2)}`
+      : "";
+  return `${c.status}${amt}`;
+}
 
 type Edit = { status: string; removal_reason: string; notes: string };
 const EMPTY_EDIT: Edit = { status: "", removal_reason: "", notes: "" };
@@ -73,6 +102,7 @@ export function FilingTracker({
   businessName,
   reviews,
   initialFilings,
+  initialCharges,
   overallRating,
   totalReviews,
 }: {
@@ -80,6 +110,10 @@ export function FilingTracker({
   businessName: string | null;
   reviews: TrackerReview[];
   initialFilings: Filing[];
+  // Optional: success-fee charges already on record, keyed off by filing_id.
+  // The page may not pass this yet; the UI degrades gracefully without it and
+  // fills in charge state as the operator charges from here.
+  initialCharges?: Charge[];
   overallRating: number | null;
   totalReviews: number | null;
 }) {
@@ -90,6 +124,15 @@ export function FilingTracker({
       return init;
     },
   );
+  // Charges keyed by filing id (a filing has at most one charge).
+  const [chargesByFiling, setChargesByFiling] = useState<Record<string, Charge>>(
+    () => {
+      const init: Record<string, Charge> = {};
+      for (const c of initialCharges ?? []) init[c.filing_id] = c;
+      return init;
+    },
+  );
+  const [chargingId, setChargingId] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, Edit>>(() => {
     const init: Record<string, Edit> = {};
     for (const f of initialFilings) {
@@ -191,6 +234,75 @@ export function FilingTracker({
     }
   }
 
+  // Charge the success fee for a CONFIRMED removal. Two-step on purpose: we
+  // fetch the operator-facing customer notice in a dry confirm dialog, and only
+  // POST { confirm: true } once the operator OKs it. Until Resend is wired this
+  // notice is what the operator emails the customer before billing.
+  async function chargeFiling(filing: Filing) {
+    if (!filing.id) {
+      setError("Save the filing first, then charge.");
+      return;
+    }
+    // Pre-charge confirm gate — we never charge silently. The server returns the
+    // exact customer notice after; this is the operator's "are you sure".
+    const ok = window.confirm(
+      `Charge the success fee for this CONFIRMED removal?\n\n` +
+        `Review by ${filing.author_name || "Anonymous"}${
+          filing.posted_at ? ` (${fmtDate(filing.posted_at)})` : ""
+        }.\n\n` +
+        `You'll get a pre-charge notice to send the customer after this runs. ` +
+        `Only proceed if Google has actually removed the review.`,
+    );
+    if (!ok) return;
+    setError(null);
+    setChargingId(filing.id);
+    try {
+      const res = await fetch(`/api/admin/filings/${filing.id}/charge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const data = await res.json();
+
+      // The route always returns a `customerNotice`; show it so the operator can
+      // send it. (TODO server-side: auto-send via Resend.)
+      if (data?.customerNotice) {
+        window.alert(
+          `Pre-charge notice to send the customer:\n\n${data.customerNotice}`,
+        );
+      }
+
+      if (res.ok && data?.ok) {
+        // Succeeded (or already charged) — record the returned charge row.
+        if (data.charge) {
+          setChargesByFiling((prev) => ({
+            ...prev,
+            [filing.id as string]: data.charge as Charge,
+          }));
+        }
+      } else {
+        // Structured failure (guard / declined / SCA / error). Reflect any
+        // returned charge row (status failed + last_error) and show the message.
+        if (data?.charge) {
+          setChargesByFiling((prev) => ({
+            ...prev,
+            [filing.id as string]: data.charge as Charge,
+          }));
+        }
+        setError(
+          data?.error ||
+            (data?.hostedInvoiceUrl
+              ? `Customer action needed: ${data.hostedInvoiceUrl}`
+              : "Charge failed."),
+        );
+      }
+    } catch {
+      setError("Charge request failed.");
+    } finally {
+      setChargingId(null);
+    }
+  }
+
   const inputCls =
     "rounded-md border border-[color:var(--border)] bg-[color:var(--surface-2)] px-2 py-1 text-xs text-[color:var(--foreground)]";
 
@@ -277,6 +389,14 @@ export function FilingTracker({
           {rows.map((row) => {
             const filing = filingsByReview[row.review_id];
             const e = edits[row.review_id] ?? EMPTY_EDIT;
+            // The success-fee charge for this filing (if any). We can only
+            // charge a SAVED filing that's confirmed 'removed' and not already
+            // charged/refunded.
+            const charge = filing?.id ? chargesByFiling[filing.id] : undefined;
+            const isRemoved = filing?.status === "removed";
+            const alreadyBilled =
+              charge?.status === "succeeded" || charge?.status === "refunded";
+            const showChargeBtn = isRemoved && filing?.id != null;
             return (
               <li
                 key={row.review_id}
@@ -304,15 +424,27 @@ export function FilingTracker({
                       </span>
                     )}
                   </div>
-                  {filing?.status && (
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-widest ${
-                        STATUS_TONE[filing.status] ?? ""
-                      }`}
-                    >
-                      {filing.status}
-                    </span>
-                  )}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {filing?.status && (
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-widest ${
+                          STATUS_TONE[filing.status] ?? ""
+                        }`}
+                      >
+                        {filing.status}
+                      </span>
+                    )}
+                    {charge && (
+                      <span
+                        title={charge.last_error || undefined}
+                        className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-widest ${
+                          CHARGE_TONE[charge.status] ?? ""
+                        }`}
+                      >
+                        fee: {fmtCharge(charge)}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {row.text_snippet ? (
@@ -384,6 +516,48 @@ export function FilingTracker({
                         : "Save"}
                   </button>
                 </div>
+
+                {/* Success-fee charge — only on a CONFIRMED removal. We charge
+                    exactly once per removed review, against the card on file. */}
+                {showChargeBtn && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => filing && chargeFiling(filing)}
+                      disabled={
+                        alreadyBilled ||
+                        charge?.status === "pending" ||
+                        chargingId === filing?.id
+                      }
+                      title={
+                        alreadyBilled
+                          ? "This removal has already been billed."
+                          : "Charges the agreed success fee to the client's card on file. Requires the client to have a saved card and active manager access — the server refuses otherwise."
+                      }
+                      className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-40"
+                    >
+                      {chargingId === filing?.id
+                        ? "Charging…"
+                        : charge?.status === "succeeded"
+                          ? "Charged ✓"
+                          : charge?.status === "refunded"
+                            ? "Refunded"
+                            : charge?.status === "failed"
+                              ? "Retry charge"
+                              : "Charge success fee"}
+                    </button>
+                    {charge?.status === "failed" && charge.last_error && (
+                      <span className="text-[11px] text-[color:var(--danger)]">
+                        {charge.last_error}
+                      </span>
+                    )}
+                    {!charge && (
+                      <span className="text-[11px] text-[color:var(--muted)]">
+                        Bills the agreed fee once — client must be billing-ready
+                        (card + active access).
+                      </span>
+                    )}
+                  </div>
+                )}
               </li>
             );
           })}

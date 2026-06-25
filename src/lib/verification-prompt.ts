@@ -100,5 +100,48 @@ GIVE ME
 1. Verdict — organic / monitor / likely coordinated attack — with a 0–100 risk score and a one-paragraph plain-English summary.
 2. Which specific reviews show genuine attack signals, and why (cite each).
 3. Which flagged reviews are probably legitimate and should be left alone.
-4. Go / no-go on outreach. If go, the single strongest evidence point to lead with in the email.`;
+4. Go / no-go on outreach. If go, the single strongest evidence point to lead with in the email.
+${EMAIL_DRAFT_INSTRUCTIONS}`;
 }
+
+// ---------------------------------------------------------------------------
+// Email-draft step (folded into the verification packet for efficiency).
+//
+// Why this lives here: verification and email-drafting are the two Claude steps
+// in the outreach funnel. Doing them in one pass saves a round trip — BUT only
+// the GO path should ever produce a pitch. This block is appended to the packet
+// above as item 5. It is deliberately additive: the verdict/no-manufacturing
+// guardrail at the top of the prompt is unchanged and still governs.
+//
+// The hard rule (mirrors docs/OUTREACH.md §0 and §9): if the verdict is NOT a
+// real attack, output ONLY the verdict and explicitly DO NOT draft any pitch.
+// We never manufacture an attack narrative — or an email — from a clean report.
+//
+// On the GO path, the model fills Template A from docs/OUTREACH.md using the
+// data already in this packet, and ends with the LITERAL compliant footer
+// (Devon, Ghost Reviews / devon@ghostreviews.app / the real mailing address /
+// reply-"STOP"). Only the genuine per-recipient fields get substituted.
+// Keep this footer byte-for-byte in sync with the canonical footer in
+// docs/OUTREACH.md §7 if either changes.
+const EMAIL_DRAFT_INSTRUCTIONS = `
+5. Email draft — CONDITIONAL, and the guardrail is the point of this step:
+   - IF AND ONLY IF your verdict in (1) is a GO (a genuine coordinated attack
+     carrying the documented signals — textless/throwaway 1-star clusters, tight
+     time clusters, vague no-specifics complaints from low-history accounts),
+     ALSO write a complete, ready-to-send cold email using Template A from
+     docs/OUTREACH.md. Fill the per-recipient fields from THIS packet's data:
+     [Business] = the business name above; [N] = how many reviews are in the
+     suspicious cluster; [window]/[date] = the time window the cluster falls in;
+     [name] = the owner's first name if known, otherwise "there". Lead with the
+     single strongest evidence point. Do NOT use any guarantee or special-access
+     language (say Google's policies *allow* removal, never that Google *will*
+     remove). End the email with this EXACT footer, verbatim, on its own lines:
+
+       — Devon, Ghost Reviews
+       devon@ghostreviews.app · Suite 1022, 1737 Richmond Street Unit #9, London, ON N5X 3Y2 · Not relevant? Reply "STOP" and we won't contact you again.
+
+   - IF your verdict is NO-GO / organic / monitor / clean, output ONLY the
+     verdict (items 1–4) and explicitly do NOT draft any email or pitch. Say
+     "No email — verdict is not a GO." Refusing to manufacture a pitch from a
+     clean report is the guardrail that keeps us inside the FTC §465.7 carve-out;
+     do not stretch a weak set of reviews into an attack just to justify a draft.`;

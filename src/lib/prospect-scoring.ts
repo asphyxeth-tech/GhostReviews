@@ -75,10 +75,22 @@ function secondsBetween(a: string, b: string): number {
   return Math.abs(parsePostedAt(a) - parsePostedAt(b));
 }
 
-// Robust to negatives-only input: the baseline rate is the business's TRUE total
-// negatives (from the place-level rating distribution, which Outscraper returns
-// regardless of the review filter) divided by the observed negative span — so it
-// stays accurate whether `reviews` is a newest-sample or a negatives-only pull.
+// Estimate how many negative (<=2*) reviews we'd expect in `windowDays` for a
+// business of this overall cadence — the velocity baseline that stops normal
+// background noise (e.g. Reliance HVAC's ~13k reviews) from tripping BURST.
+//
+// VELOCITY-NORMALIZATION CORRECTION (lockstep with prospect.py):
+// The previous version divided the all-time expected negatives by the span of
+// only the *pulled* reviews. On a negatives-only deep pull that's wrong: the
+// pulled negatives might cover most of the business's life or just a recent
+// slice, so the implied rate jumped around and weakened the volume-artifact
+// guard. Instead we estimate the business's LIFETIME NEGATIVE span:
+//   lifetimeSpanDays ≈ observedNegSpanDays * (totalNegativesAllTime / pulledNegativesCount)
+// (i.e. if the pulled negatives are a fraction of all negatives and span
+// observedNegSpanDays, the full negative history spans proportionally longer),
+// then:
+//   expectedNegativesPerWindow = expectedTotalNeg / (lifetimeSpanDays / windowDays)
+// where expectedTotalNeg = totalReviews * negShare ≈ totalNegativesAllTime.
 function expectedNegativesPerWindow(
   ratingSummary: RatingSummary | null,
   reviews: ScoredReview[],
@@ -106,14 +118,31 @@ function expectedNegativesPerWindow(
   // Can't estimate — fall back to 0 ("unknown, don't suppress the anchor").
   if (totalReviews === 0 || negShare === 0) return 0;
 
-  const tss = reviews.map((r) => parsePostedAt(r.posted_at));
+  // The business's all-time negative count (1* + 2*).
+  const expectedTotalNeg = totalReviews * negShare;
+
+  // Observed span of the NEGATIVES we actually pulled. Negatives are the right
+  // basis here because the scaling ratio below is in negative-count units; on a
+  // negatives-only pull this is the whole pulled set, on a blended/newest pull
+  // it's the negative subset.
+  const negs = reviews.filter((r) => r.rating <= 2);
+  const pulledNeg = negs.length;
+  if (pulledNeg === 0) return 0; // no negatives pulled -> can't estimate
+
+  const tss = negs.map((r) => parsePostedAt(r.posted_at));
   const oldest = Math.min(...tss);
   const newest = Math.max(...tss);
-  let spanDays = (newest - oldest) / 86400;
-  if (spanDays < 7) spanDays = 90; // tiny span -> assume ~3 months of activity
+  let observedNegSpanDays = (newest - oldest) / 86400;
+  if (observedNegSpanDays < 7) observedNegSpanDays = 90; // tiny span -> assume ~3 months
 
-  const expectedTotalNeg = totalReviews * negShare;
-  return (expectedTotalNeg / Math.max(spanDays, 1)) * windowDays;
+  // Scale the observed negative span up to the LIFETIME negative span. Clamp the
+  // ratio to >= 1 so we never SHRINK the span (the pulled<=total invariant means
+  // pulled≈total gives ratio≈1 and the span is left unchanged, as required).
+  const scale = Math.max(1, expectedTotalNeg / pulledNeg);
+  const lifetimeSpanDays = Math.max(observedNegSpanDays * scale, 1);
+
+  // Pro-rate the all-time negatives across the estimated lifetime, per window.
+  return expectedTotalNeg / (lifetimeSpanDays / windowDays);
 }
 
 function findRollingWindowPeak(

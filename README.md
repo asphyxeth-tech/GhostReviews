@@ -84,6 +84,7 @@ All keys are optional — the app gracefully degrades when one is missing.
 | `TOWER_APP_NAME` | Optional | Defaults to `ghost-reviews` (matches the Towerfile). |
 | `NEXT_PUBLIC_SUPABASE_URL` | Optional | Sign-in and the scan-history dashboard are disabled; anonymous scans work as always. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Optional | Same as above — both Supabase vars must be present together. |
+| `GBP_MANAGER_EMAIL` | Optional | The Google identity a concierge client invites as a **Manager** on their Google Business Profile. Shown in the onboarding walkthrough + admin panel. **Must be a real, sign-in-capable Google account** (not just an alias) — verify it can actually accept a Manager invite on a test profile *before* using it with a client. Defaults to `devon@ghostreviews.app`. |
 
 **Never commit `.env*` files** — they're gitignored.
 
@@ -95,8 +96,23 @@ Customer accounts (magic-link email sign-in) and the scan-history dashboard
 are powered by Supabase. One-time setup:
 
 1. Create a project at [supabase.com](https://supabase.com) (free tier is fine).
-2. Open **SQL Editor → New query**, paste the contents of
-   [`supabase/migrations/0001_scans.sql`](./supabase/migrations/0001_scans.sql), and **Run**.
+2. Open **SQL Editor → New query** and run **every** migration in
+   [`supabase/migrations/`](./supabase/migrations/) **in order, 0001 through
+   0008** (paste each file's contents and **Run**). All are required for a real
+   deploy — they're idempotent, so re-running is safe. What each adds:
+   - `0001_scans.sql` — customer scan history (the magic-link dashboard).
+   - `0002`–`0003` — the prospect/admin flywheel + per-business metadata.
+   - `0004_services.sql` — the cost/subscription registry.
+   - `0005_filings.sql` — the removal-request tracker.
+   - **`0006_rate_events.sql` — REQUIRED. This is the rate limiter for the public
+     `/api/analyze` scan. If you skip it the public scan is UNTHROTTLED — anyone
+     can run unlimited scans and run up your Anthropic + Outscraper bills. Do not
+     skip this one.**
+   - `0007_clients.sql` — onboarded clients + card-on-file state.
+   - **`0008_billing_consent_outreach.sql` — enables documented consent capture,
+     the Phase-B success-fee billing ledger, and the outreach `suppressions`
+     (do-not-contact) list. Required before onboarding any real client or sending
+     outreach.**
 3. In **Authentication → URL Configuration**, set the Site URL to
    `https://ghostreviews.app` and add these Redirect URLs:
    - `https://ghostreviews.app/auth/callback`
@@ -115,6 +131,22 @@ nothing persisted.
 ### How it actually runs
 
 The system is designed to degrade honestly rather than fail. With **no keys**, the demo flow runs against the bundled sample dataset and a canned report — useful for screenshots and stakeholder demos. With **just `NIMBLE_API_KEY`**, the app falls back to the canned demo (Nimble is only called when there's a Claude key to actually analyze the live batch). With **just `ANTHROPIC_API_KEY`**, the app runs live Claude analysis on the bundled sample dataset. With **both keys**, the app scrapes live reviews via Nimble and analyzes them with Claude. The UI labels each report with its actual data source ("Live Google data" vs. "Demo dataset") so the operator and the viewer always know which path produced what they're seeing.
+
+## Launch checklist
+
+Before pointing real traffic (or real money) at a deploy:
+
+- [ ] **All Supabase migrations applied, 0001 through 0008** (see above) — in
+      particular **0006**, or the public scan is unthrottled.
+- [ ] **Hard monthly spend cap set in BOTH the [Anthropic console](https://console.anthropic.com/)
+      AND the [Outscraper dashboard](https://outscraper.com/).** This is the real
+      backstop: if the in-app rate limiter (0006) is ever misconfigured or fails
+      open, these provider-side caps are what stop a runaway bill. Set them low
+      and raise deliberately — don't rely on the app limiter alone.
+- [ ] `GBP_MANAGER_EMAIL` set to a real, sign-in-capable Google account, and
+      verified able to accept a Manager invite on a test profile.
+- [ ] Outreach sends from a **separate** subdomain/sibling domain, never the
+      transactional `devon@ghostreviews.app` (see `docs/OUTREACH.md` §7a).
 
 ## Ethical use
 

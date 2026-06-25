@@ -160,18 +160,19 @@ low-friction, and a reply is express interest.
 >
 > Want me to send the report?
 >
-> — [Name], Ghost Reviews
-> [contact email] · [mailing address] · *Not relevant? Reply "stop" and I won't
-> follow up.*
+> — Devon, Ghost Reviews
+> devon@ghostreviews.app · Suite 1022, 1737 Richmond Street Unit #9, London, ON
+> N5X 3Y2 · Not relevant? Reply "STOP" and we won't contact you again.
 
 ### Template B — "soft heads-up" (for milder signals / warmer intros)
 > **Subject:** Quick heads-up about a few reviews on [Business]
 >
 > Hi [name] — noticed a cluster of recent 1-star reviews on [Business] that look
 > off (a few posted minutes apart from brand-new accounts). Could be nothing, but
-> it fits the fake-review pattern Google will remove. I made you a quick free
-> report if you want a look — just say the word. — [Name], Ghost Reviews
-> [contact] · [address] · reply "stop" to opt out.
+> it fits the fake-review pattern Google's policies allow removing. I made you a
+> quick free report if you want a look — just say the word. — Devon, Ghost Reviews
+> devon@ghostreviews.app · Suite 1022, 1737 Richmond Street Unit #9, London, ON
+> N5X 3Y2 · Not relevant? Reply "STOP" and we won't contact you again.
 
 ### Personalization checklist (fill before sending)
 - [ ] Exact count + time window of the suspicious cluster
@@ -179,6 +180,21 @@ low-friction, and a reply is express interest.
 - [ ] At least one concrete "no-specifics" example
 - [ ] Business name spelled right; correct owner name if known
 - [ ] Verified by Claude (not pre-filter only)
+
+### Before you hit send (final gate — every email, no exceptions)
+- [ ] **Footer is the LITERAL canonical block** (§7) — Devon, Ghost Reviews /
+      devon@ghostreviews.app / the real London ON address / reply-"STOP". NO
+      brackets left except the genuine per-recipient fields (`[Name]`,
+      `[Business]`, `[N]`, `[window]`).
+- [ ] **Recipient checked against the suppression list** — run
+      `node scripts/scans.mjs check <email>`; if suppressed, DO NOT SEND.
+- [ ] **No guarantee / special-access language** — we say Google's policies
+      *allow* removal, never that Google *will* remove or that we have any
+      special access to Google.
+- [ ] **Evidence-led** — the email leads with the specific finding (the
+      textless-throwaway 1-star cluster, with the count + window), not a pitch.
+- [ ] **Claude-verified GO** — never email off `prospect.py` output alone (§0, §5).
+- [ ] **Sending from the separate outreach domain**, not the transactional one (§7a).
 
 ---
 
@@ -209,9 +225,11 @@ present, and the relevance reason.
 - **A free, one-click unsubscribe** (or "reply STOP"), valid **60 days**, and
   **honored within 10 business days**. Keep a suppression list; check it every send.
 
-Footer template:
-> Ghost Reviews · [Street / PO Box], [City], ON [Postal] · [email / site]
-> Not relevant? [Unsubscribe] or reply "STOP" — I won't follow up.
+**The canonical footer (use this literal block on EVERY email — do not leave
+any field bracketed except none; this footer has no per-recipient fields):**
+> — Devon, Ghost Reviews
+> devon@ghostreviews.app · Suite 1022, 1737 Richmond Street Unit #9, London, ON
+> N5X 3Y2 · Not relevant? Reply "STOP" and we won't contact you again.
 
 **Express consent (the cleaner, inbound path):** on the website's free scan, add an
 *unchecked* opt-in box ("I agree to receive emails from Ghost Reviews about my
@@ -231,12 +249,46 @@ if you use truthful From/subject, include a physical address, and honor opt-outs
 within 10 business days. Max ~$53k/email, but low risk for targeted, legitimate
 outreach.
 
+**One footer for everyone:** use the CASL footer (the canonical block above) for
+EVERY recipient regardless of country — it's the strictest bar and satisfies US
+CAN-SPAM automatically. Don't branch the footer by geography; you'll only
+introduce a way to ship a non-compliant one.
+
 **Numbers:** honor unsubscribe ≤ **10 business days** · contact + unsub link valid
 **60 days** · conspicuous-publication consent has **no expiry** (but only while the
 address stays published).
 
 > The full sourced brief (CRTC, fightspam.gc.ca, Gowling WLG, BLG, McInnes Cooper,
 > Osler) is in the PR that introduced this file.
+
+---
+
+## 7a. Deliverability & sending discipline
+
+Compliance keeps us legal; deliverability keeps us *seen* — and protects the
+mail that the business actually runs on. The two failure modes here are landing
+in spam and, worse, torching the reputation of the domain that powers
+customer/auth email.
+
+- **Send cold outreach from a SEPARATE subdomain or sibling domain** — e.g.
+  `outreach.ghostreviews.app` or a dedicated sending domain — **NOT** from
+  `devon@ghostreviews.app`. That transactional address also powers magic-link
+  sign-in; a spam-reputation hit there would break customer and auth mail. The
+  *footer identity* stays `devon@ghostreviews.app` (so replies and opt-outs reach
+  Devon and we honor "STOP" against the suppression list), but the *envelope /
+  sending domain* must be the separate one. Set up SPF, DKIM, and DMARC on the
+  sending domain before the first send.
+- **Warm up gradually.** A brand-new sending domain that suddenly blasts dozens
+  of cold emails looks exactly like a spammer to inbox providers. Start at a
+  handful per day and ramp over several weeks before you're anywhere near the cap.
+- **Watch bounce + spam-complaint rates.** A rising hard-bounce rate (bad/guessed
+  addresses) or any spam complaints means stop and fix — both directly damage
+  domain reputation and deliverability. Pause and investigate rather than push
+  through.
+- **Daily cap (explicit):** no more than **20 cold emails per day** while
+  ramping. This is a discipline number, not a quota to hit — most days will be
+  far fewer, because we only ever send to Claude-verified leads (§5), and there
+  simply aren't 20 of those a day.
 
 ---
 
