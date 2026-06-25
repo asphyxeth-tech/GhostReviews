@@ -40,7 +40,7 @@ const STEPS = [
     n: "01",
     title: "Paste your URL",
     body:
-      "Your Google Business Profile URL is all we need to start. No account, no signup.",
+      "Your Google Business Profile URL is all we need to start. The free scan runs instantly — no payment required.",
   },
   {
     n: "02",
@@ -52,7 +52,7 @@ const STEPS = [
     n: "03",
     title: "Get your report",
     body:
-      "An authenticity report with an overall risk score, every flagged review explained in plain English, and a drafted policy-violation request you can copy and submit to Google.",
+      "Your free scan shows an overall risk score and how many reviews we flagged. Create a free account to see exactly which reviews we flagged, the plain-English reasons, and the drafted policy-violation request you can submit to Google.",
   },
 ];
 
@@ -67,12 +67,12 @@ export default function Home() {
           <div className="flex items-center gap-5">
             <a
               href="/login"
-              className="text-sm text-[color:var(--muted)] transition hover:text-[color:var(--foreground)]"
+              className="text-xs text-[color:var(--muted)]/70 transition hover:text-[color:var(--muted-strong)]"
             >
               Sign in
             </a>
             <a
-              href="mailto:onlinedevon88@gmail.com?subject=Ghost Reviews"
+              href="mailto:devon@ghostreviews.app?subject=Ghost Reviews"
               className="text-sm text-[color:var(--muted)] transition hover:text-[color:var(--foreground)]"
             >
               Contact →
@@ -93,9 +93,9 @@ export default function Home() {
           </h1>
           <p className="mt-7 max-w-2xl text-lg leading-relaxed text-[color:var(--muted-strong)] sm:text-xl">
             Coordinated review-bombing attacks tank local businesses every day.
-            Ghost Reviews scans your Google Business Profile, surfaces the
-            fraud signals, and drafts the policy-violation request you submit
-            to Google.
+            Scan your Google Business Profile free in seconds — create a free
+            account to see exactly which reviews we flagged and the drafted
+            removal requests you can submit to Google.
           </p>
           <div className="mt-10 w-full max-w-2xl">
             <UrlAnalyzeForm />

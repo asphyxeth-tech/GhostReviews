@@ -61,9 +61,18 @@ export default function PrivacyPage() {
                 <strong className="text-[color:var(--foreground)]">
                   Technical information collected automatically.
                 </strong>{" "}
-                A limited amount of request metadata, including your IP address,
-                which we use for security and to rate-limit abuse of our public
-                scanner, plus standard server logs.
+                To rate-limit abuse of our public scanner we record the IP
+                address of each scan request, retain it for a fixed 30-day window,
+                and then automatically purge it. We also keep standard short-lived
+                server logs for security.
+              </li>
+              <li>
+                <strong className="text-[color:var(--foreground)]">
+                  Free scans are not stored.
+                </strong>{" "}
+                When an anonymous visitor runs a free scan, we do not save the
+                scan or its results to an account. Scans are only saved to your
+                scan history when you run them while signed in.
               </li>
               <li>
                 <strong className="text-[color:var(--foreground)]">
@@ -75,11 +84,12 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong className="text-[color:var(--foreground)]">
-                  Payment information.
+                  Payment information (paying customers only).
                 </strong>{" "}
-                For paying customers, payments are processed by Stripe. We never
-                see or store your full card number; Stripe handles card data
-                directly.
+                If you become a paying customer, payments are processed by Stripe.
+                We never see or store your full card number; Stripe handles card
+                data directly. Free-scan visitors never provide payment
+                information.
               </li>
             </ul>
           </Section>
@@ -109,29 +119,32 @@ export default function PrivacyPage() {
             <ul className="mt-3 list-disc space-y-2 pl-6">
               <li>
                 <strong className="text-[color:var(--foreground)]">Anthropic</strong>{" "}
-                — AI analysis of review content.
+                — AI analysis of public review content (every scan).
               </li>
               <li>
                 <strong className="text-[color:var(--foreground)]">
                   Outscraper / Nimble
                 </strong>{" "}
-                — retrieving publicly available Google review data.
+                — retrieving publicly available Google review data (every scan).
               </li>
               <li>
                 <strong className="text-[color:var(--foreground)]">Google</strong>{" "}
-                — we access publicly available business and review data.
+                — we access publicly available business and review data (every
+                scan), and customers may delegate us as a Manager on their
+                Business Profile for done-for-you filing.
               </li>
               <li>
                 <strong className="text-[color:var(--foreground)]">Supabase</strong>{" "}
-                — database and authentication.
+                — database and authentication (account holders only; anonymous
+                free scans are not stored).
               </li>
               <li>
                 <strong className="text-[color:var(--foreground)]">Vercel</strong>{" "}
-                — website hosting and infrastructure.
+                — website hosting and infrastructure (all visitors).
               </li>
               <li>
                 <strong className="text-[color:var(--foreground)]">Stripe</strong>{" "}
-                — payment processing.
+                — payment processing (paying customers only).
               </li>
             </ul>
             <p className="mt-3 leading-relaxed">
@@ -156,9 +169,11 @@ export default function PrivacyPage() {
           <Section title="5. Data retention">
             <p className="leading-relaxed">
               We retain account information and saved scans while your account is
-              active. You may request deletion of your account and associated data
-              at any time by contacting us, and we will delete it except where we
-              are required to retain it by law.
+              active. Anonymous free scans are not stored. IP addresses recorded
+              for rate-limiting are kept for a fixed 30-day window and then
+              automatically purged. You may request deletion of your account and
+              associated data at any time by contacting us, and we will delete it
+              except where we are required to retain it by law.
             </p>
           </Section>
 

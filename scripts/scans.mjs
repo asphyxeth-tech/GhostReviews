@@ -3,10 +3,14 @@
 // straight from Supabase so we can review leads in-session instead of pasting
 // walls of text into chat.
 //
+// The one exception to "read-only" is the suppression (do-not-contact) list:
+// the outreach playbook mandates checking it before every send and recording
+// opt-outs, so `suppress` writes a single row to the `suppressions` table.
+//
 // Reads NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY from the
 // environment (configure them on the Claude Code environment + Vercel — NEVER
 // commit them). The service-role key bypasses RLS; this script only ever SELECTs
-// and never prints the key.
+// (plus the suppression upsert) and never prints the key.
 //
 // Usage:
 //   node scripts/scans.mjs leads              # candidates (score >= 50), latest per business
@@ -14,6 +18,9 @@
 //   node scripts/scans.mjs all                # show every current lead (for batch verification)
 //   node scripts/scans.mjs filings <place_id> # removal filings for one business
 //   node scripts/scans.mjs stats              # totals
+//   node scripts/scans.mjs check <email>      # is this email on the do-not-contact list?
+//   node scripts/scans.mjs suppress <email> [reason]  # add an opt-out (do-not-contact)
+//   node scripts/scans.mjs suppressions       # list the do-not-contact list
 
 import { createClient } from "@supabase/supabase-js";
 
@@ -142,21 +149,86 @@ async function cmdStats() {
   console.log(`filings logged:      ${filingCount ?? "?"}`);
 }
 
+// Normalize an email the same way everywhere (lowercase + trim) so the lookup
+// key always matches what `suppress` stored.
+function normEmail(email) {
+  return (email || "").trim().toLowerCase();
+}
+
+async function cmdCheck(emailArg) {
+  const email = normEmail(emailArg);
+  if (!email) return fail("check needs an <email>");
+  const { data, error } = await sb
+    .from("suppressions")
+    .select("*")
+    .eq("email", email)
+    .maybeSingle();
+  if (error) return fail(error.message);
+  if (!data) {
+    console.log(`${email}: NOT suppressed — ok to contact (still verify the lead first)`);
+    return;
+  }
+  console.log(
+    `${email}: SUPPRESSED — do NOT contact\n` +
+      `  reason ${data.reason || "?"}  source ${data.source || "?"}  since ${
+        (data.opted_out_at || "").slice(0, 10)
+      }`,
+  );
+}
+
+async function cmdSuppress(emailArg, reasonArg) {
+  const email = normEmail(emailArg);
+  if (!email) return fail("suppress needs an <email>");
+  const row = {
+    email,
+    reason: reasonArg || "manual",
+    source: "cli",
+    opted_out_at: new Date().toISOString(),
+  };
+  const { error } = await sb
+    .from("suppressions")
+    .upsert(row, { onConflict: "email" });
+  if (error) return fail(error.message);
+  console.log(`suppressed ${email} (reason ${row.reason}) — will be skipped on every send`);
+}
+
+async function cmdSuppressions() {
+  const { data, error } = await sb
+    .from("suppressions")
+    .select("*")
+    .order("opted_out_at", { ascending: false })
+    .limit(2000);
+  if (error) return fail(error.message);
+  const rows = data || [];
+  console.log(`${rows.length} suppressed (do-not-contact)\n`);
+  for (const s of rows) {
+    console.log(
+      `  ${(s.email || "?").padEnd(36)}  ${(s.reason || "?").padEnd(12)}  ${
+        (s.source || "?").padEnd(8)
+      }  ${(s.opted_out_at || "").slice(0, 10)}`,
+    );
+  }
+}
+
 function fail(msg) {
   console.error(msg);
   process.exit(1);
 }
 
-const [cmd, arg] = process.argv.slice(2);
+const [cmd, arg, arg2] = process.argv.slice(2);
 try {
   if (cmd === "leads") await cmdLeads();
   else if (cmd === "show") await cmdShow(arg);
   else if (cmd === "all") await cmdAll();
   else if (cmd === "filings") await cmdFilings(arg);
   else if (cmd === "stats") await cmdStats();
+  else if (cmd === "check") await cmdCheck(arg);
+  else if (cmd === "suppress") await cmdSuppress(arg, arg2);
+  else if (cmd === "suppressions") await cmdSuppressions();
   else {
     console.log(
-      "Commands: leads | show <place_id> | all | filings <place_id> | stats",
+      "Commands: leads | show <place_id> | all | filings <place_id> | stats | " +
+        "check <email> | suppress <email> [reason] | suppressions",
     );
   }
 } catch (err) {

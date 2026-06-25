@@ -31,7 +31,7 @@ export async function POST(
 
   const { data: client } = await sb
     .from("clients")
-    .select("id, place_id, stripe_customer_id, status")
+    .select("id, place_id, stripe_customer_id, status, onboarding_token_expires_at")
     .eq("onboarding_token", token)
     .maybeSingle();
   if (!client || !client.stripe_customer_id)
@@ -41,6 +41,20 @@ export async function POST(
     return NextResponse.json(
       { error: "This card is already authorized." },
       { status: 409 },
+    );
+  // Reject expired onboarding links — they shouldn't be able to start a Stripe
+  // session. (Checked after the active-state guard so a returning, already-active
+  // client never sees a confusing "expired" error.)
+  if (
+    client.onboarding_token_expires_at &&
+    new Date(client.onboarding_token_expires_at).getTime() < Date.now()
+  )
+    return NextResponse.json(
+      {
+        error:
+          "This onboarding link has expired. Please contact us for a new one.",
+      },
+      { status: 410 },
     );
 
   const origin = req.nextUrl.origin;

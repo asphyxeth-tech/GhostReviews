@@ -253,7 +253,10 @@ export function UrlAnalyzeForm() {
         </div>
 
         <div className="mt-3 flex flex-col items-start gap-2 text-sm text-[color:var(--muted)] sm:flex-row sm:items-center sm:justify-between">
-          <p>Free analysis. No login. Public review data only.</p>
+          <p>
+            Free instant scan. Public review data only. Create a free account to
+            unlock the flagged reviews.
+          </p>
           <button
             type="button"
             onClick={handleTowerSubmit}

@@ -30,31 +30,19 @@ const RISK_BADGE: Record<string, { bg: string; text: string; label: string }> = 
 };
 
 export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
-  const { mode, business_url, generated_at, reviews_source, reviews_total, report } =
-    data;
+  const { business_url, generated_at, reviews_total, report } = data;
   const badge = RISK_BADGE[report.risk_level] ?? RISK_BADGE.medium;
   // For anonymous (gated) scans the flagged-review detail is withheld, so the
   // true count comes from flagged_count rather than the (empty) array.
   const flaggedShown = data.gated
     ? (data.flagged_count ?? 0)
     : report.flagged_reviews.length;
-  // Any non-mock source (outscraper / nimble) is a live scrape;
-  // only "mock" is the bundled demo dataset.
-  const isLive = reviews_source !== "mock";
-  const sourceLabel = isLive ? "Live Google data" : "Demo dataset";
+  // Public scans always run against live, publicly available Google review
+  // data — there is no demo/mock dataset served to visitors.
+  const sourceLabel = "Live Google data";
 
   return (
     <div className="animate-fade-in-up text-left">
-      {mode === "stub" && (
-        <div className="mb-8 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-2)] px-4 py-3 text-sm text-[color:var(--muted-strong)]">
-          <strong className="text-[color:var(--foreground)]">Demo mode.</strong>{" "}
-          The Claude analysis step is returning a canned result because no{" "}
-          <code className="font-mono text-xs">ANTHROPIC_API_KEY</code> is
-          configured in this environment. The same code path runs against
-          live Claude analysis when the key is present.
-        </div>
-      )}
-
       <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-7 sm:p-9">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-baseline gap-4">
@@ -97,11 +85,7 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
           </span>
           <span
             className="inline-flex items-center rounded-full border border-[color:var(--border)] bg-[color:var(--surface-2)] px-2 py-0.5 text-[10px] uppercase tracking-widest text-[color:var(--muted-strong)]"
-            title={
-              isLive
-                ? "Reviews pulled live from your public Google profile"
-                : "Reviews from the bundled sample dataset"
-            }
+            title="Reviews pulled live from your public Google profile"
           >
             {sourceLabel}
           </span>
@@ -111,40 +95,44 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
         </div>
       </div>
 
-      {isLive && (
-        <div className="mt-6 rounded-2xl border border-[color:var(--accent)]/30 bg-[color:var(--accent)]/[0.06] p-6 sm:p-7">
-          <h3 className="text-base font-semibold text-[color:var(--foreground)]">
-            This is a free preview
-            {typeof reviews_total === "number" &&
-            reviews_total > report.total_reviews_analyzed
-              ? ` — we scanned your ${report.total_reviews_analyzed} most recent reviews of ${reviews_total.toLocaleString()} total.`
-              : ` — we scanned your ${report.total_reviews_analyzed} most recent reviews.`}
-          </h3>
-          <p className="mt-3 text-sm leading-relaxed text-[color:var(--muted-strong)]">
-            Reputation protection is ongoing work. With{" "}
-            <span className="font-medium text-[color:var(--foreground)]">
-              Ghost Reviews
-            </span>{" "}
-            you get a{" "}
-            <strong className="font-medium text-[color:var(--foreground)]">
-              complete audit of every review
-            </strong>{" "}
-            your business has ever received — a full evidence report you can act
-            on — plus{" "}
-            <strong className="font-medium text-[color:var(--foreground)]">
-              always-on monitoring
-            </strong>{" "}
-            that scans new reviews as they arrive and alerts you the moment a
-            coordinated attack appears.
-          </p>
-          <a
-            href="mailto:onlinedevon88@gmail.com?subject=Ghost%20Reviews%20%E2%80%94%20full%20audit%20%2B%20monitoring&body=I%27d%20like%20the%20complete%20audit%20and%20ongoing%20protection%20for%20my%20business.%20Here%27s%20my%20Google%20Business%20Profile%3A%20"
-            className="mt-5 inline-flex items-center gap-2 rounded-lg bg-[color:var(--accent)] px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-[color:var(--accent-glow)]"
-          >
-            Get the full audit + ongoing protection →
-          </a>
-        </div>
-      )}
+      <div className="mt-6 rounded-2xl border border-[color:var(--accent)]/30 bg-[color:var(--accent)]/[0.06] p-6 sm:p-7">
+        <h3 className="text-base font-semibold text-[color:var(--foreground)]">
+          This is a free preview
+          {typeof reviews_total === "number" &&
+          reviews_total > report.total_reviews_analyzed
+            ? ` — we scanned your ${report.total_reviews_analyzed} most recent reviews of ${reviews_total.toLocaleString()} total.`
+            : ` — we scanned your ${report.total_reviews_analyzed} most recent reviews.`}
+        </h3>
+        <p className="mt-3 text-sm leading-relaxed text-[color:var(--muted-strong)]">
+          Reputation protection is ongoing work. With{" "}
+          <span className="font-medium text-[color:var(--foreground)]">
+            Ghost Reviews
+          </span>{" "}
+          you get a{" "}
+          <strong className="font-medium text-[color:var(--foreground)]">
+            complete audit of every review
+          </strong>{" "}
+          your business has ever received — a full evidence report you can act
+          on — plus{" "}
+          <strong className="font-medium text-[color:var(--foreground)]">
+            always-on monitoring
+          </strong>{" "}
+          that scans new reviews as they arrive and alerts you the moment a
+          coordinated attack appears. If you&apos;d like a hand, we can also act
+          as a Manager on your Google profile and file the policy-violation
+          reports for you.
+        </p>
+        <a
+          href="mailto:devon@ghostreviews.app?subject=Ghost%20Reviews%20%E2%80%94%20request%20my%20full%20audit&body=I%27d%20like%20the%20complete%20audit%20and%20ongoing%20protection%20for%20my%20business.%20Here%27s%20my%20Google%20Business%20Profile%3A%20"
+          className="mt-5 inline-flex items-center gap-2 rounded-lg bg-[color:var(--accent)] px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-[color:var(--accent-glow)]"
+        >
+          Request your full audit →
+        </a>
+        <p className="mt-4 text-xs leading-relaxed text-[color:var(--muted)]">
+          Independent · based in London, ON · you stay in control of your Google
+          profile — you can remove our access anytime.
+        </p>
+      </div>
 
       <div className="mt-10">
         <h3 className="font-mono text-xs uppercase tracking-[0.18em] text-[color:var(--accent)]">
@@ -153,10 +141,13 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
         {data.gated ? (
           <LockedFlagged count={flaggedShown} />
         ) : report.flagged_reviews.length === 0 ? (
-          <p className="mt-6 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6 text-sm text-[color:var(--muted-strong)]">
-            No reviews exhibited the fraud signals we look for. Negative
-            reviews with specific, falsifiable details belong on Google.
-          </p>
+          <>
+            <p className="mt-6 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6 text-sm text-[color:var(--muted-strong)]">
+              No reviews exhibited the fraud signals we look for. Negative
+              reviews with specific, falsifiable details belong on Google.
+            </p>
+            <CleanMonitoringCta />
+          </>
         ) : (
           <div className="mt-6 space-y-5">
             {report.flagged_reviews.map((flagged) => (
@@ -177,10 +168,13 @@ export function AnalysisReport({ data }: { data: AnalyzeResponse }) {
 function LockedFlagged({ count }: { count: number }) {
   if (count === 0) {
     return (
-      <p className="mt-6 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6 text-sm text-[color:var(--muted-strong)]">
-        No reviews exhibited the fraud signals we look for. Negative reviews with
-        specific, falsifiable details belong on Google.
-      </p>
+      <>
+        <p className="mt-6 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6 text-sm text-[color:var(--muted-strong)]">
+          No reviews exhibited the fraud signals we look for. Negative reviews
+          with specific, falsifiable details belong on Google.
+        </p>
+        <CleanMonitoringCta />
+      </>
     );
   }
   return (
@@ -189,20 +183,44 @@ function LockedFlagged({ count }: { count: number }) {
         🔒
       </div>
       <h4 className="mt-3 text-lg font-semibold text-[color:var(--foreground)]">
-        {count} review{count === 1 ? "" : "s"} flagged for removal
+        {count} review{count === 1 ? "" : "s"} showing strong signals
       </h4>
       <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-[color:var(--muted-strong)]">
-        We&apos;ve identified {count} review{count === 1 ? "" : "s"} showing
-        strong signals of inauthentic, policy-violating activity — and drafted a
-        removal request for each. Create a free account to see exactly which
-        reviews, why they&apos;re flagged, and get the ready-to-file removal
-        requests.
+        We&apos;ve flagged {count} review{count === 1 ? "" : "s"} showing strong
+        signals of inauthentic, policy-violating activity — and drafted a removal
+        request for each. Create a free account to see exactly which reviews,
+        the plain-English reasons, and the ready-to-file removal requests.
       </p>
       <a
         href="/login"
         className="mt-5 inline-flex items-center gap-2 rounded-lg bg-[color:var(--accent)] px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-[color:var(--accent-glow)]"
       >
-        See the flagged reviews — free →
+        Create a free account to unlock →
+      </a>
+    </div>
+  );
+}
+
+/**
+ * Soft monitoring CTA shown on the "no signals found" state. A clean scan today
+ * is the right moment to offer ongoing watch — framed as protection, never a
+ * scare. Captures intent via a prefilled mailto since there's no booking tool.
+ */
+function CleanMonitoringCta() {
+  return (
+    <div className="mt-5 rounded-2xl border border-[color:var(--accent)]/25 bg-[color:var(--accent)]/[0.05] p-6 text-center">
+      <h4 className="text-base font-semibold text-[color:var(--foreground)]">
+        You&apos;re clean today.
+      </h4>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-[color:var(--muted-strong)]">
+        Attacks can start any time. Want us to watch your profile and alert you
+        the moment a coordinated attack appears?
+      </p>
+      <a
+        href="mailto:devon@ghostreviews.app?subject=Ghost%20Reviews%20%E2%80%94%20monitor%20my%20profile&body=My%20latest%20scan%20was%20clean.%20I%27d%20like%20ongoing%20monitoring%20so%20I%27m%20alerted%20if%20an%20attack%20starts.%20Here%27s%20my%20Google%20Business%20Profile%3A%20"
+        className="mt-4 inline-flex items-center gap-2 rounded-lg border border-[color:var(--accent)]/40 px-5 py-2.5 text-sm font-semibold text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/10"
+      >
+        Watch my profile →
       </a>
     </div>
   );

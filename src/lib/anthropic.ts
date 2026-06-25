@@ -86,7 +86,7 @@ ${JSON.stringify(reviews, null, 2)}${distributionContext}
 Apply your analysis framework and return a structured report. Flag only reviews showing genuine policy-violation signals; do NOT flag legitimate negative reviews even if they are harsh.`;
 
   const response = await client.messages.parse({
-    model: "claude-opus-4-7",
+    model: "claude-opus-4-8",
     max_tokens: 16000,
     thinking: { type: "adaptive" },
     output_config: {

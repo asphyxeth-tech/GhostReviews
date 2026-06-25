@@ -584,12 +584,22 @@ def _expected_negatives_per_window(
     window_days: int,
 ) -> float:
     """Estimate how many negative (≤2★) reviews we'd expect in `window_days`
-    based on the business's overall cadence.
+    for a business of this overall cadence — the velocity baseline that stops
+    normal background noise (e.g. Reliance HVAC's ~13k reviews) from tripping
+    BURST.
 
-    Strategy:
-        1. Use the all-time review count from rating_summary if available.
-        2. Estimate the time span covered by the pulled reviews.
-        3. Derive: expected = (total_reviews * neg_share) / age_days * window_days
+    VELOCITY-NORMALIZATION CORRECTION (lockstep with prospect-scoring.ts):
+    The previous version divided the all-time expected negatives by the span of
+    only the *pulled* reviews.  On a negatives-only deep pull that's wrong: the
+    pulled negatives might cover most of the business's life or just a recent
+    slice, so the implied rate jumped around and weakened the volume-artifact
+    guard.  Instead we estimate the business's LIFETIME NEGATIVE span:
+        lifetime_span_days ≈ observed_neg_span_days * (total_negatives_all_time / pulled_negatives_count)
+    (i.e. if the pulled negatives are a fraction of all negatives and span
+    observed_neg_span_days, the full negative history spans proportionally
+    longer), then:
+        expected_per_window = expected_total_neg / (lifetime_span_days / window_days)
+    where expected_total_neg = total_reviews * neg_share ≈ total_negatives_all_time.
 
     Falls back to 0.0 (conservative — fires the anchor) when we don't have
     enough data to estimate.  A return of 0.0 means "we can't tell, allow it
@@ -623,21 +633,34 @@ def _expected_negatives_per_window(
         # don't suppress the anchor on insufficient data").
         return 0.0
 
-    # Estimate business age in days from the oldest review we pulled.
-    oldest_ts = min(_parse_posted_at(r["posted_at"]) for r in reviews)
-    newest_ts = max(_parse_posted_at(r["posted_at"]) for r in reviews)
-    span_days = (newest_ts - oldest_ts) / 86400.0
-
-    # If we only have a tiny span (e.g. all reviews today), use a
-    # rough estimate: assume the pulled depth covers ~3 months of activity.
-    if span_days < 7:
-        span_days = 90.0
-
-    # Expected negatives over the life of the business.
+    # The business's all-time negative count (1★ + 2★).
     expected_total_neg = total_reviews * neg_share
-    # Pro-rate to the window.
-    expected_per_window = expected_total_neg / max(span_days, 1) * window_days
-    return expected_per_window
+
+    # Observed span of the NEGATIVES we actually pulled.  Negatives are the right
+    # basis here because the scaling ratio below is in negative-count units; on a
+    # negatives-only pull this is the whole pulled set, on a blended/newest pull
+    # it's the negative subset.
+    negs = [r for r in reviews if r.get("rating", 5) <= 2]
+    pulled_neg = len(negs)
+    if pulled_neg == 0:
+        return 0.0  # no negatives pulled -> can't estimate
+
+    oldest_ts = min(_parse_posted_at(r["posted_at"]) for r in negs)
+    newest_ts = max(_parse_posted_at(r["posted_at"]) for r in negs)
+    observed_neg_span_days = (newest_ts - oldest_ts) / 86400.0
+    # If we only have a tiny span (e.g. all negatives today), use a rough
+    # estimate: assume the pulled negatives cover ~3 months of activity.
+    if observed_neg_span_days < 7:
+        observed_neg_span_days = 90.0
+
+    # Scale the observed negative span up to the LIFETIME negative span.  Clamp
+    # the ratio to >= 1 so we never SHRINK the span (the pulled<=total invariant
+    # means pulled≈total gives ratio≈1 and the span is left unchanged).
+    scale = max(1.0, expected_total_neg / pulled_neg)
+    lifetime_span_days = max(observed_neg_span_days * scale, 1.0)
+
+    # Pro-rate the all-time negatives across the estimated lifetime, per window.
+    return expected_total_neg / (lifetime_span_days / window_days)
 
 
 def _find_rolling_window_peak(

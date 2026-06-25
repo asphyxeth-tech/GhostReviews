@@ -95,6 +95,12 @@ export async function POST(req: NextRequest) {
   });
 
   const token = randomBytes(24).toString("base64url");
+  // Onboarding links expire after 14 days — they reveal business name + fee terms
+  // and, pre-auth, let anyone start a Stripe setup session, so they shouldn't
+  // live forever. The token routes + onboard pages reject anything past this.
+  const tokenExpiresAt = new Date(
+    Date.now() + 14 * 24 * 60 * 60 * 1000,
+  ).toISOString();
 
   const { data, error } = await g.sb
     .from("clients")
@@ -105,6 +111,7 @@ export async function POST(req: NextRequest) {
       fee_per_removal: feePerRemoval,
       stripe_customer_id: customer.id,
       onboarding_token: token,
+      onboarding_token_expires_at: tokenExpiresAt,
       status: "pending",
       created_by: g.admin.id,
     })
@@ -138,4 +145,56 @@ export async function POST(req: NextRequest) {
     client: data,
     onboarding_url: onboardingUrl(req, token),
   });
+}
+
+// PATCH → admin-gated update of a client's Manager-access state. Used by the
+// BillingPanel to record what happened on Google's side:
+//   action: "accept_access"  → access_status='active',  sets access_granted_at
+//   action: "revoke_access"  → access_status='revoked', sets access_revoked_at
+// Identify the client by `id` (preferred) or `place_id`.
+//
+// This is the operator confirming reality (we accepted the invite / access was
+// removed). The client's self-reported 'invited' state comes from the public
+// /api/onboard/[token]/access route; only the admin can flip it to active.
+export async function PATCH(req: NextRequest) {
+  const g = await gate();
+  if (g.error) return g.error;
+
+  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const action = typeof body.action === "string" ? body.action : "";
+  const id = typeof body.id === "string" ? body.id : "";
+  const placeId = typeof body.place_id === "string" ? body.place_id : "";
+  if (!id && !placeId)
+    return NextResponse.json(
+      { error: "id or place_id is required" },
+      { status: 400 },
+    );
+
+  const now = new Date().toISOString();
+  let patch: Record<string, unknown>;
+  if (action === "accept_access") {
+    patch = { access_status: "active", access_granted_at: now };
+  } else if (action === "revoke_access") {
+    patch = { access_status: "revoked", access_revoked_at: now };
+  } else {
+    return NextResponse.json(
+      { error: "unknown action (expected accept_access | revoke_access)" },
+      { status: 400 },
+    );
+  }
+
+  let q = g.sb.from("clients").update(patch);
+  q = id ? q.eq("id", id) : q.eq("place_id", placeId);
+  const { data, error } = await q.select().maybeSingle();
+  if (error) {
+    console.error("[/api/admin/clients PATCH] update failed:", error);
+    return NextResponse.json(
+      { error: "Could not update access status." },
+      { status: 500 },
+    );
+  }
+  if (!data)
+    return NextResponse.json({ error: "client not found" }, { status: 404 });
+
+  return NextResponse.json({ client: data });
 }

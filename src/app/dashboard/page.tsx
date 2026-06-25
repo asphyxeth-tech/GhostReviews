@@ -105,6 +105,41 @@ export default async function DashboardPage() {
             </Link>
           </div>
 
+          <div className="mt-8 rounded-2xl border border-[color:var(--accent)]/30 bg-[color:var(--accent)]/[0.06] p-6 sm:p-8">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+              <div className="max-w-2xl">
+                <h2 className="text-xl font-semibold tracking-tight text-[color:var(--foreground)]">
+                  Want us to handle this for you?
+                </h2>
+                <p className="mt-3 text-sm leading-relaxed text-[color:var(--muted-strong)]">
+                  Scanning is only half the job. With{" "}
+                  <strong className="font-medium text-[color:var(--foreground)]">
+                    ongoing monitoring
+                  </strong>{" "}
+                  we re-scan your profile on a schedule and alert you the moment
+                  new flagged reviews appear — so an attack never catches you
+                  unaware. With{" "}
+                  <strong className="font-medium text-[color:var(--foreground)]">
+                    done-for-you concierge
+                  </strong>{" "}
+                  you add us as a Manager on your Google Business Profile and we
+                  file the policy-violation reports for you, then track each
+                  outcome.
+                </p>
+                <p className="mt-3 text-xs leading-relaxed text-[color:var(--muted)]">
+                  Independent · based in London, ON · you stay in control of your
+                  Google profile — you can remove our access anytime.
+                </p>
+              </div>
+              <a
+                href="mailto:devon@ghostreviews.app?subject=Ghost%20Reviews%20%E2%80%94%20monitoring%20%2B%20done-for-you&body=I%27m%20signed%20in%20and%20I%27d%20like%20help%20protecting%20my%20reviews.%20I%27m%20interested%20in%20ongoing%20monitoring%20and%2For%20the%20done-for-you%20concierge%20%28filing%20removal%20requests%20as%20a%20Manager%20on%20my%20Google%20profile%29.%20Here%27s%20my%20Google%20Business%20Profile%3A%20"
+                className="inline-flex shrink-0 items-center gap-2 self-start rounded-lg bg-[color:var(--accent)] px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-[color:var(--accent-glow)] lg:self-auto"
+              >
+                Talk to us about your profile →
+              </a>
+            </div>
+          </div>
+
           {scans.length === 0 ? (
             <div className="mt-10 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-8 text-sm text-[color:var(--muted-strong)]">
               No scans saved yet. Run a scan from the{" "}
