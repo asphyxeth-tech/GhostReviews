@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getAdminUser, createSupabaseAdmin } from "@/lib/admin";
 import { signalDef } from "@/lib/signal-defs";
 import { FilingTracker, type Filing } from "@/components/FilingTracker";
+import { BillingPanel } from "@/components/BillingPanel";
 import { CopyButton } from "@/components/CopyButton";
 import { buildVerificationPacket } from "@/lib/verification-prompt";
 
@@ -399,6 +400,14 @@ export default async function BusinessFilePage({
               </p>
             )}
           </div>
+        </div>
+
+        {/* Billing — card on file (Stripe) */}
+        <div className="mt-6">
+          <BillingPanel
+            placeId={decodedPlaceId}
+            businessName={latest.business_name}
+          />
         </div>
 
         {/* Removal filings tracker (Phase 3) */}
