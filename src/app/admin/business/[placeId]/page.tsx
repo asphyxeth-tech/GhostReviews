@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getAdminUser, createSupabaseAdmin } from "@/lib/admin";
 import { signalDef } from "@/lib/signal-defs";
-import { FilingTracker, type Filing } from "@/components/FilingTracker";
+import { FilingTracker, type Filing, type Charge } from "@/components/FilingTracker";
 import { BillingPanel } from "@/components/BillingPanel";
 import { CopyButton } from "@/components/CopyButton";
 import { buildVerificationPacket } from "@/lib/verification-prompt";
@@ -108,6 +108,14 @@ export default async function BusinessFilePage({
     .select("*")
     .eq("place_id", decodedPlaceId);
   const filings = (filingData ?? []) as Filing[];
+
+  // Success-fee charges already on record (Phase B), so the tracker shows each
+  // filing's billed state on load instead of only after the operator charges.
+  const { data: chargeData } = await sb
+    .from("removal_charges")
+    .select("id, filing_id, status, amount_minor, currency, last_error")
+    .eq("place_id", decodedPlaceId);
+  const charges = (chargeData ?? []) as Charge[];
 
   const latest = rows[0];
   const flagged = Array.isArray(latest.flagged_reviews)
@@ -417,6 +425,7 @@ export default async function BusinessFilePage({
             businessName={latest.business_name}
             reviews={trackerReviews}
             initialFilings={filings}
+            initialCharges={charges}
             overallRating={latest.overall_rating ?? null}
             totalReviews={latest.total_reviews ?? null}
           />

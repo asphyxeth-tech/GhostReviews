@@ -234,23 +234,23 @@ export function FilingTracker({
     }
   }
 
-  // Charge the success fee for a CONFIRMED removal. Two-step on purpose: we
-  // fetch the operator-facing customer notice in a dry confirm dialog, and only
-  // POST { confirm: true } once the operator OKs it. Until Resend is wired this
-  // notice is what the operator emails the customer before billing.
+  // Charge the success fee for a CONFIRMED removal. We never charge silently:
+  // an explicit confirm dialog gates it, and on success the server emails the
+  // customer their removal + receipt confirmation automatically (falling back to
+  // a copy-paste notice if email isn't configured).
   async function chargeFiling(filing: Filing) {
     if (!filing.id) {
       setError("Save the filing first, then charge.");
       return;
     }
-    // Pre-charge confirm gate — we never charge silently. The server returns the
-    // exact customer notice after; this is the operator's "are you sure".
+    // Pre-charge confirm gate — the operator's "are you sure".
     const ok = window.confirm(
       `Charge the success fee for this CONFIRMED removal?\n\n` +
         `Review by ${filing.author_name || "Anonymous"}${
           filing.posted_at ? ` (${fmtDate(filing.posted_at)})` : ""
         }.\n\n` +
-        `You'll get a pre-charge notice to send the customer after this runs. ` +
+        `We'll email the customer their confirmation automatically (or give you ` +
+        `the text to send if email isn't set up). ` +
         `Only proceed if Google has actually removed the review.`,
     );
     if (!ok) return;
@@ -264,21 +264,29 @@ export function FilingTracker({
       });
       const data = await res.json();
 
-      // The route always returns a `customerNotice`; show it so the operator can
-      // send it. (TODO server-side: auto-send via Resend.)
-      if (data?.customerNotice) {
-        window.alert(
-          `Pre-charge notice to send the customer:\n\n${data.customerNotice}`,
-        );
-      }
-
       if (res.ok && data?.ok) {
-        // Succeeded (or already charged) — record the returned charge row.
+        // Succeeded (or already charged) — record the returned charge row and
+        // tell the operator whether the customer email went out.
         if (data.charge) {
           setChargesByFiling((prev) => ({
             ...prev,
             [filing.id as string]: data.charge as Charge,
           }));
+        }
+        if (data.emailed) {
+          window.alert(
+            "✓ Charged. We emailed the customer their removal + receipt confirmation.",
+          );
+        } else if (data?.customerNotice) {
+          const why =
+            data.emailReason === "email_not_configured"
+              ? "Email isn't configured (set RESEND_API_KEY)."
+              : data.emailReason === "no_contact_email"
+                ? "No contact email on file for this client."
+                : "Email couldn't be sent.";
+          window.alert(
+            `✓ Charged. ${why}\n\nSend the customer this confirmation:\n\n${data.customerNotice}`,
+          );
         }
       } else {
         // Structured failure (guard / declined / SCA / error). Reflect any
