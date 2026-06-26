@@ -170,10 +170,14 @@ effect.
 
 ## Known follow-ups (non-blocking)
 
-- `FilingTracker` accepts an optional `initialCharges` prop; the admin page can
-  fetch `removal_charges` and pass them so charge state shows on load.
-- Wire **Resend** so the pre-charge customer notice (and magic-link/auth mail)
-  send automatically instead of being hand-copied.
+- ✅ `FilingTracker` charge-state-on-load — the admin business page now fetches
+  `removal_charges` and passes them as `initialCharges`.
+- ✅ **Resend** wired (`src/lib/email.ts`, env-gated): a successful success-fee
+  charge now auto-emails the customer their removal + receipt confirmation
+  (falls back to a copy-paste notice if `RESEND_API_KEY` is unset). To enable,
+  set `RESEND_API_KEY` (+ optional `RESEND_FROM`) in Vercel and verify a sender
+  on the domain. NOTE: magic-link/auth mail is sent by Supabase, not this helper
+  — to route it through Resend, set Supabase Auth's custom SMTP in its dashboard.
 - Per-business grouping + rating timeline in the dashboard; monthly auto-scan
   cron + diff alerts (the re-scan diff also corroborates "removal confirmed").
 - Velocity scoring could add rating-entropy-in-burst as cheap extra-precision

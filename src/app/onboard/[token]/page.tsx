@@ -52,6 +52,7 @@ export default async function OnboardPage({
   const isExpired =
     !isActive &&
     !!client.onboarding_token_expires_at &&
+    // eslint-disable-next-line react-hooks/purity -- server component renders once per request; comparing token expiry to the current time is intentional
     new Date(client.onboarding_token_expires_at).getTime() < Date.now();
 
   const fee = money(client.fee_per_removal, client.currency);

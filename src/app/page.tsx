@@ -52,7 +52,27 @@ const STEPS = [
     n: "03",
     title: "Get your report",
     body:
-      "Your free scan shows an overall risk score and how many reviews we flagged. Create a free account to see exactly which reviews we flagged, the plain-English reasons, and the drafted policy-violation request you can submit to Google.",
+      "Your free scan shows an overall risk score and how many reviews we flagged. Create a free account to see exactly which reviews we flagged, the plain-English reasons, and the drafted policy-violation request — yours to submit, or we'll file it for you.",
+  },
+];
+
+// The done-for-you concierge — the actual service (you add us as a Manager and
+// we file the removals for you, on a success-fee basis).
+const CONCIERGE = [
+  {
+    title: "Official delegation",
+    body:
+      "You add us as a Manager through Google's own system — the same way you'd add an employee. No passwords shared, nothing unofficial.",
+  },
+  {
+    title: "You stay in control",
+    body:
+      "See every review we flag, and remove our access in a few clicks at any time. We act only with your written consent.",
+  },
+  {
+    title: "Pay on results",
+    body:
+      "We file each policy-violation report and track it through to Google's decision. You only pay when a review is actually removed.",
   },
 ];
 
@@ -95,7 +115,8 @@ export default function Home() {
             Coordinated review-bombing attacks tank local businesses every day.
             Scan your Google Business Profile free in seconds — create a free
             account to see exactly which reviews we flagged and the drafted
-            removal requests you can submit to Google.
+            removal requests. When you&apos;re ready, we&apos;ll file them with
+            Google for you, and you only pay when a review is actually removed.
           </p>
           <div className="mt-10 w-full max-w-2xl">
             <UrlAnalyzeForm />
@@ -107,11 +128,11 @@ export default function Home() {
         <div className="mx-auto grid max-w-5xl gap-10 sm:grid-cols-3">
           <Stat
             top="$53,000"
-            label="Maximum FTC penalty per fake review under the Consumer Review Rule, in effect since 2024."
+            label="The FTC penalty per fake review since 2024 — the accounts attacking you are breaking the law, and that strengthens every removal request."
           />
           <Stat
-            top="Federal"
-            label="Posting or soliciting fake reviews is now a federal violation in the United States."
+            top="Against policy"
+            label="Fake, incentivized, and conflict-of-interest reviews violate Google's policies worldwide — the basis for getting them taken down."
           />
           <Stat
             top="Transparent"
@@ -167,6 +188,39 @@ export default function Home() {
         </div>
       </section>
 
+      <section className="border-t border-[color:var(--border)] px-6 py-20 sm:px-10 sm:py-28">
+        <div className="mx-auto max-w-5xl">
+          <SectionHeading
+            eyebrow="Done for you"
+            title="Or hand the whole thing to us."
+          />
+          <p className="mt-6 max-w-2xl text-base leading-relaxed text-[color:var(--muted-strong)]">
+            Found a coordinated attack? You don&apos;t have to fight Google&apos;s
+            removal process alone. We file the policy-violation reports for you
+            and track each one through to a decision — as an official, fully
+            reversible Manager on your Google Business Profile.
+          </p>
+          <div className="mt-10 grid gap-5 sm:grid-cols-3">
+            {CONCIERGE.map((c) => (
+              <div
+                key={c.title}
+                className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/40 p-5"
+              >
+                <h3 className="text-base font-semibold">{c.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-[color:var(--muted-strong)]">
+                  {c.body}
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-8 max-w-2xl text-sm leading-relaxed text-[color:var(--muted)]">
+            Ghost Reviews is run by Devon, an independent operator based in
+            London, Ontario — a real person you can email, not a faceless
+            platform.
+          </p>
+        </div>
+      </section>
+
       <section className="border-t border-[color:var(--border)] bg-[color:var(--surface)]/40 px-6 py-20 sm:px-10">
         <div className="mx-auto max-w-3xl">
           <SectionHeading
@@ -185,8 +239,9 @@ export default function Home() {
               <span className="text-[color:var(--foreground)]">
                 likelihood and reasons
               </span>
-              , never a definitive verdict. You submit removal requests through
-              Google&apos;s official channels — we do not delete reviews,
+              , never a definitive verdict. Removal requests go through
+              Google&apos;s official channels — filed by you, or by us as a
+              Manager you&apos;ve authorized in writing. We never delete reviews,
               automate mass-flagging, or attempt to game Google&apos;s systems.
             </p>
             <p>We analyze only public review content. No private data is touched.</p>
