@@ -76,6 +76,30 @@ const CONCIERGE = [
   },
 ];
 
+// The dual-market legal/credibility band. Every claim here was verified against
+// a primary source (eCFR + Federal Register for the US rule; the Competition
+// Bureau for Canada; Google's content policy). We deliberately print NO penalty
+// figure: the US per-violation amount is inflation-adjusted (unverified this
+// pass) and Canada's is a "greater of" floor, not a simple cap — so both are
+// stated qualitatively to stay accurate.
+const STATS = [
+  {
+    top: "Federal law",
+    label:
+      "In the U.S., fake reviews are illegal under the FTC's Rule on the Use of Consumer Reviews and Testimonials (16 CFR Part 465, in effect since October 2024) — including textless ratings from people who never set foot in your business.",
+  },
+  {
+    top: "Banned in Canada too",
+    label:
+      "Canada's Competition Bureau treats 'astroturfing' — fake reviews disguised as real customers — as a deceptive marketing practice under the Competition Act, with multi-million-dollar penalties on the table.",
+  },
+  {
+    top: "Against Google's rules",
+    label:
+      "Reviews that aren't based on a genuine experience, go off-topic, or come from competitors and conflicts of interest violate Google's Maps content policy worldwide and are eligible for removal.",
+  },
+];
+
 export default function Home() {
   return (
     <div className="ghost-bg flex flex-1 flex-col">
@@ -126,18 +150,9 @@ export default function Home() {
 
       <section className="border-y border-[color:var(--border)] bg-[color:var(--surface)]/40 px-6 py-16 sm:px-10">
         <div className="mx-auto grid max-w-5xl gap-10 sm:grid-cols-3">
-          <Stat
-            top="$53,000"
-            label="The FTC penalty per fake review since 2024 — the accounts attacking you are breaking the law, and that strengthens every removal request."
-          />
-          <Stat
-            top="Against policy"
-            label="Fake, incentivized, and conflict-of-interest reviews violate Google's policies worldwide — the basis for getting them taken down."
-          />
-          <Stat
-            top="Transparent"
-            label="Every signal we surface comes with a plain-English reason. No black boxes."
-          />
+          {STATS.map((s) => (
+            <Stat key={s.top} top={s.top} label={s.label} />
+          ))}
         </div>
       </section>
 
@@ -232,7 +247,8 @@ export default function Home() {
               Ghost Reviews is a tool for owners who have been targeted by
               policy-violating review activity. It is not a tool for hiding
               honest negative criticism — suppressing legitimate reviews is
-              itself an FTC violation and is firmly out of scope.
+              itself unlawful review manipulation under the same
+              consumer-protection rules, and is firmly out of scope.
             </p>
             <p>
               All output is framed as{" "}
