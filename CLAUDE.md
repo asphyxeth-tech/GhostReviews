@@ -47,16 +47,17 @@ Always frame output as **likelihood / signals with reasons** — never a definit
 
 **Current:**
 - Frontend: Next.js (App Router) + Tailwind on Vercel
-- Instant scan: `/api/analyze` (Nimble scrape → Claude analysis, ~40 reviews)
-- Deep audit: Tower serverless Python pipeline (`pipeline/`), ~200 reviews, no time ceiling, trigger+poll from the UI
+- Instant scan: `/api/analyze` (Outscraper blended pull → Claude analysis, ~60 reviews; Nimble fallback REMOVED — see `docs/COST_OVERHAUL.md`)
+- Deep audit: Tower serverless Python pipeline (`pipeline/`), ~200 reviews — ADMIN-ONLY now, on the retirement path (COST_OVERHAUL §4.5)
 - Analysis: Claude API — system prompt and schema kept in lockstep between `src/lib/anthropic.ts` and `pipeline/task.py`
+- Cost posture: see `docs/COST_OVERHAUL.md` (the decided plan; its §5 rejected-ideas list is binding)
 
 **Target (agreed direction, build incrementally):**
 - **Supabase** — Postgres + auth (magic link) for customers, businesses, scan history, filing tracker
 - **Inngest** (or similar) — background jobs + monthly cron scans, replacing Tower
-- **Google Business Profile API** — official, free review access for connected customers (requires Google approval; apply early). Scraping then only serves prospect audits / lead gen.
-- **Scraping vendor review** — Nimble was a hackathon sponsor choice and has shown latency instability; evaluate Outscraper / DataForSEO / SerpApi on cost and reliability before scaling prospect scans.
-- **Stripe** (billing) + **Resend** (email) when first paying customers land.
+- **Google Business Profile API** — applied, REJECTED Jun 2026 (listing/website mismatch). Not a dependency: Outscraper covers connected customers; revisit only if the savings ever matter.
+- **Scraping vendor** — decided: Outscraper is the only review source (negatives-only deep pulls). Nimble deleted; paid Outscraper discovery deleted (Google Places is mandatory for discovery).
+- **Stripe** (billing, shipped test-mode) + **Resend** (email, wired env-gated).
 
 ## Conventions
 

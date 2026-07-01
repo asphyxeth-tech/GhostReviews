@@ -1,8 +1,21 @@
 # Ghost Reviews — Handoff / State of Play
 
-_Last updated: 2026-06-26. Living document — update it at the end of any working
+_Last updated: 2026-07-01. Living document — update it at the end of any working
 session. No secrets and no named prospect/customer lists belong in this file
 (the repo is effectively public). Targets live in Devon's private notes._
+
+> **⚠️ MODEL HANDOFF (read first).** The 2026-06-30→07-01 sessions ran on Claude
+> Fable 5 (available ~6 more days from 07-01); the next sessions will run on
+> Opus 4.8. THREE briefing docs carry the full state — read in this order:
+> 1. **`docs/COST_OVERHAUL.md`** — the decided cost plan. Its **Section 7 is the
+>    handoff briefing written for you**: execution order, key file map with line
+>    numbers, open questions for Devon, and the non-negotiable operating rules.
+>    Section 5 lists REJECTED ideas — do not re-propose them.
+> 2. **`docs/REVIEW_PROSPECTOR_INTEGRATION.md`** — the fold-in of Devon's local
+>    discovery engine: the combined scout→judge methodology, the 5/7 red-team
+>    scorecard, and the TWO PENDING SCORER FIXES (gated on Devon's sign-off +
+>    his local `detect.py`/`places.py` source, still not received).
+> 3. This file — launch status + the customer journey.
 
 ## What this is
 

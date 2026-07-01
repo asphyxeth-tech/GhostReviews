@@ -1,13 +1,16 @@
 /**
- * GET /api/analyze-tower/[runSeq]
+ * GET /api/analyze-tower/[runSeq] — ADMIN-ONLY (internal), pending Tower
+ * retirement.
  *
  * Polls a Tower run's status. If the run is still in flight, returns its
  * current status. If terminal-success (`exited`), fetches the run's logs,
  * extracts the JSON result emitted on the `__GHOST_RESULT__:` sentinel
  * line, and returns the parsed AnalyzeResponse.
  *
- * The browser is expected to call this repeatedly (~every 2s) until
- * `terminal: true` in the response, then render the report.
+ * The caller is expected to poll this (~every 2s) until `terminal: true`.
+ * Run sequence numbers are small integers, so without a gate anyone could
+ * enumerate them and harvest full paid reports — hence the same admin
+ * allowlist gate as the trigger route, until Tower is retired.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -20,7 +23,7 @@ import {
   isTerminalStatus,
 } from "@/lib/tower";
 import { AnalyzeResponseSchema } from "@/lib/analysis-schema";
-import { saveScanIfAuthenticated } from "@/lib/scan-store";
+import { getAdminUser } from "@/lib/admin";
 
 // Vercel Hobby caps Node functions at 10s by default. The poll itself
 // is fast, but fetching Tower logs once the run is terminal can take a
@@ -34,6 +37,13 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ runSeq: string }> },
 ) {
+  // Admin gate first — run results are the full paid deliverable, and the
+  // run IDs are guessable. Internal-only until Tower is retired.
+  const admin = await getAdminUser();
+  if (!admin) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const { runSeq: runSeqStr } = await params;
   const runSeq = Number(runSeqStr);
 
@@ -142,10 +152,11 @@ export async function GET(
       );
     }
 
-    // Signed-in users get the completed deep audit saved to their
-    // dashboard. The tower_run_seq dedupes re-polls of a finished run.
-    await saveScanIfAuthenticated(validation.data, { towerRunSeq: run.number });
-
+    // Deliberately NOT saved to any user's scan history. The old behavior
+    // (saveScanIfAuthenticated here) wrote the report into whichever
+    // signed-in account happened to poll — i.e. someone else's audit could
+    // land in an arbitrary poller's dashboard. Admin runs don't need
+    // customer-side persistence, so the save is simply gone.
     return NextResponse.json(payload);
   } catch (err) {
     if (err instanceof TowerError) {

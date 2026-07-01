@@ -1,14 +1,16 @@
 /**
- * POST /api/analyze-tower
+ * POST /api/analyze-tower — ADMIN-ONLY (internal), pending Tower retirement.
  *
  * Triggers a Tower run of the ghost-reviews app for the given
- * business URL. Returns the run's sequence number immediately. The browser
+ * business URL. Returns the run's sequence number immediately. The caller
  * is expected to poll GET /api/analyze-tower/{runSeq} until the run reaches
  * a terminal status and the parsed AnalyzeResponse is returned.
  *
- * This is the async / pipeline-mode counterpart to /api/analyze (which
- * calls Claude directly and returns the result in one round-trip). Both
- * routes coexist; this one demonstrates Tower as the analysis runtime.
+ * Each run is expensive (cloud run + 200-review scrape + a big Claude call,
+ * ~$0.55+), so this is no longer a public surface: only the operator
+ * (ADMIN_EMAILS allowlist) can trigger it. Tower is on the retirement path —
+ * the paid deep audit will move to the Outscraper/TypeScript path — so this
+ * gate is the holding position, not a customer feature.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -18,8 +20,7 @@ import {
   getTowerConfig,
   triggerTowerRun,
 } from "@/lib/tower";
-import { createSupabaseServer } from "@/lib/supabase/server";
-import { checkRateLimit, clientIp } from "@/lib/rate-limit";
+import { getAdminUser } from "@/lib/admin";
 
 // Vercel Hobby caps Node functions at 10s by default. Triggering a
 // Tower run is normally fast, but the upstream control-plane call can
@@ -34,27 +35,17 @@ const RequestSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  // Admin gate first — the deep audit is the most expensive path in the app,
+  // and it's internal-only until Tower is retired. No rate limiting needed on
+  // top: an allowlist of one is the strictest throttle there is.
+  const admin = await getAdminUser();
+  if (!admin) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   try {
     const body = await req.json();
     const { url } = RequestSchema.parse(body);
-
-    // The deep audit is the most expensive path — throttle anonymous callers
-    // hard (signed-in users are exempt).
-    let isAuthed = false;
-    const supabase = await createSupabaseServer();
-    if (supabase) {
-      const { data } = await supabase.auth.getUser();
-      isAuthed = Boolean(data.user);
-    }
-    if (!isAuthed) {
-      const limit = await checkRateLimit("analyze-tower", clientIp(req), {
-        perIp: 2,
-        globalDaily: 50,
-      });
-      if (!limit.ok) {
-        return NextResponse.json({ error: limit.reason }, { status: 429 });
-      }
-    }
 
     const config = getTowerConfig();
     const run = await triggerTowerRun(config, { business_url: url });
