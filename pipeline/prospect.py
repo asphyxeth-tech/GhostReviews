@@ -1289,7 +1289,21 @@ def main() -> int:
         help=(
             "Discovery mode: instead of --input, search Google Maps for "
             "businesses matching QUERY (e.g. 'auto repair, London, Ontario, "
-            "Canada') and score each.  Use this OR --input."
+            "Canada') and score each.  Use this OR --input.  PAID: this uses "
+            "Outscraper's Maps search and spends real credits, so it is "
+            "disabled unless --allow-paid-discovery is also passed.  Prefer "
+            "the free tiled Google sweep (local Prospector) or the web app's "
+            "/admin discovery (Google Places)."
+        ),
+    )
+    parser.add_argument(
+        "--allow-paid-discovery",
+        action="store_true",
+        help=(
+            "Explicitly allow --discover to spend PAID Outscraper Maps-search "
+            "credits.  Off by default (docs/COST_OVERHAUL.md, Section 3 item "
+            "7): free discovery via the local Prospector's tiled Google sweep "
+            "or the web app's Google Places search replaces this path."
         ),
     )
     parser.add_argument(
@@ -1392,6 +1406,31 @@ def main() -> int:
 
     # --- Discovery mode: search Maps, then score the discovered businesses ---
     if args.discover:
+        # PAID-DISCOVERY GATE (docs/COST_OVERHAUL.md, Section 3 item 7):
+        # Outscraper Maps search bills real money per sweep, and free
+        # replacements exist (the local Prospector's tiled Google sweep, or
+        # the web app's /admin discovery via Google Places).  Default OFF so
+        # nobody spends credits by muscle memory.
+        if not args.allow_paid_discovery:
+            print(
+                "ERROR: --discover uses Outscraper's PAID Maps search and is "
+                "disabled by default.\n"
+                "  Free replacements:\n"
+                "    - the local Prospector's tiled Google sweep, or\n"
+                "    - the web app's /admin discovery (Google Places, "
+                "GOOGLE_MAPS_API_KEY).\n"
+                "  To spend Outscraper credits anyway, re-run with "
+                "--allow-paid-discovery.",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            "[prospect] *** WARNING: PAID discovery enabled "
+            "(--allow-paid-discovery). ***\n"
+            "[prospect] *** This Outscraper Maps search spends real credits; "
+            "the free Google sweep is preferred. ***",
+            file=sys.stderr,
+        )
         print(
             f"[prospect] discovering: {args.discover!r} "
             f"(limit={args.discover_limit}, region={args.region})",

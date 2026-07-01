@@ -1,14 +1,17 @@
-// POST /api/admin/discover — admin-only. Sweep Google Maps (Outscraper) across a
-// basket of category seeds for one city, union + dedupe, then apply the discovery
-// filters before anything gets scored. Google Maps search is keyword-gated (no
-// "all businesses in a city" mode), so the basket IS the broad net.
+// POST /api/admin/discover — admin-only. Sweep Google Maps (via the FREE Google
+// Places Text Search API) across a basket of category seeds for one city, union
+// + dedupe, then apply the discovery filters before anything gets scored. Maps
+// search is keyword-gated (no "all businesses in a city" mode), so the basket
+// IS the broad net.
+//
+// Google is the ONLY discovery source. The paid Outscraper Maps-search fallback
+// was deleted (docs/COST_OVERHAUL.md §3 item 7) — it fired silently whenever
+// GOOGLE_MAPS_API_KEY was missing, spending credits on an env-var typo. A
+// missing key is now a loud 500, never a quiet charge.
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminUser } from "@/lib/admin";
-import {
-  discoverBusinesses as discoverViaOutscraper,
-  type DiscoveredBusiness,
-} from "@/lib/outscraper-search";
-import { discoverBusinesses as discoverViaGoogle } from "@/lib/google-places";
+import type { DiscoveredBusiness } from "@/lib/outscraper-search";
+import { discoverBusinesses } from "@/lib/google-places";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +24,15 @@ const SEARCH_CONCURRENCY = 6;
 export async function POST(req: NextRequest) {
   const admin = await getAdminUser();
   if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  // Discovery REQUIRES the free Google Places key — fail loudly rather than
+  // silently spending paid Outscraper credits (the old fallback behavior).
+  if (!process.env.GOOGLE_MAPS_API_KEY) {
+    return NextResponse.json(
+      { error: "Google discovery not configured — set GOOGLE_MAPS_API_KEY" },
+      { status: 500 },
+    );
+  }
 
   try {
     const body = await req.json();
@@ -68,13 +80,6 @@ export async function POST(req: NextRequest) {
       return Number.isFinite(ones) ? ones / b.total_reviews : 0;
     };
 
-    // Prefer the free, official Google Places API for discovery; fall back to
-    // Outscraper's Maps search if the Google key isn't configured. (Discovery is
-    // just rating + count + category — the paid Outscraper review-pull deep-dive
-    // is unchanged downstream.)
-    const useGoogle = Boolean(process.env.GOOGLE_MAPS_API_KEY);
-    const discover = useGoogle ? discoverViaGoogle : discoverViaOutscraper;
-
     // Build the search terms: "<vertical>, <city>" per seed (or just the city
     // when no basket is given).
     const terms = verticals.length
@@ -91,7 +96,7 @@ export async function POST(req: NextRequest) {
       for (;;) {
         const i = next++;
         if (i >= terms.length) break;
-        const found = await discover(terms[i], { limit, region });
+        const found = await discoverBusinesses(terms[i], { limit, region });
         for (const b of found) {
           if (b.place_id && !seen.has(b.place_id)) {
             seen.add(b.place_id);
@@ -110,8 +115,9 @@ export async function POST(req: NextRequest) {
       if (maxReviews > 0 && b.total_reviews > maxReviews) return false;
       // Rating ceiling: keep unknown ratings (don't drop on missing data).
       if (maxRating > 0 && b.rating != null && b.rating > maxRating) return false;
-      // 1-star share: only apply when the distribution is available (Outscraper).
-      // Google discovery doesn't return it, so this filter is skipped there.
+      // 1-star share: only apply when the distribution is available. Google
+      // discovery doesn't return reviews_per_score, so this filter is a no-op
+      // today — kept (safely guarded) for any future source that provides it.
       if (
         minOneStarPct > 0 &&
         b.reviews_per_score &&
@@ -128,7 +134,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       city,
       verticals_searched: terms.length,
-      discovery_source: useGoogle ? "google" : "outscraper",
+      discovery_source: "google",
       discovered: union.length,
       kept: kept.length,
       businesses: kept,

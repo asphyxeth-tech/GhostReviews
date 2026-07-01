@@ -123,7 +123,7 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong className="text-[color:var(--foreground)]">
-                  Outscraper / Nimble
+                  Outscraper
                 </strong>{" "}
                 — retrieving publicly available Google review data (every scan).
               </li>

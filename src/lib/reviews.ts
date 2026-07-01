@@ -1,10 +1,11 @@
-// Provider-agnostic entry point for pulling a business's reviews.
+// Entry point for pulling a business's reviews.
 //
-// Strategy: Outscraper is the primary source (clean structured data, cheap
-// pay-as-you-go, and it has a fast synchronous mode for the instant scan plus
-// an async mode for deep audits). Nimble is the automatic fallback — it covers
-// Outscraper being unconfigured, erroring, or too slow, so the swap is
-// zero-downtime.
+// Outscraper is the ONLY review source. The legacy Nimble fallback was deleted
+// (docs/COST_OVERHAUL.md §3 item 6): it fired silently on every Outscraper
+// timeout, spending a second paid vendor's credits with no budget and no log.
+// When Outscraper comes up empty we now return null and the callers respond
+// honestly — the public scan route returns a clean 502 ("try again"), which is
+// the right posture at $0 revenue.
 //
 // `deep`: false (default) uses Outscraper's fast sync path — for the instant
 // scan. true uses the async path (poll for minutes) — for the deep audit.
@@ -14,16 +15,15 @@ import {
   type ScrapeOptions,
   type BusinessMeta,
 } from "./outscraper";
-import { scrapeBusinessReviews as scrapeViaNimble } from "./nimble";
 
-export type ReviewSource = "outscraper" | "nimble";
+export type ReviewSource = "outscraper";
 
 export type BusinessReviews = {
   reviews: Review[];
   rating_summary: RatingSummary | null;
   source: ReviewSource;
-  // Business-level metadata (contact info, map, Google links). Only the
-  // Outscraper path populates this; the Nimble fallback leaves it undefined.
+  // Business-level metadata (contact info, map, Google links). Best-effort —
+  // Outscraper doesn't always populate every field.
   business?: BusinessMeta | null;
 };
 
@@ -32,18 +32,14 @@ export async function getBusinessReviews(
   maxReviews: number,
   opts: ScrapeOptions = {},
 ): Promise<BusinessReviews | null> {
-  // Primary: Outscraper.
   const os = await scrapeViaOutscraper(input, maxReviews, opts);
   if (os && os.reviews.length > 0) {
     return { ...os, source: "outscraper" };
   }
 
-  // Fallback: Nimble (legacy synchronous scraper).
-  const nimble = await scrapeViaNimble(input, maxReviews, opts.sinceMs);
-  if (nimble && nimble.reviews.length > 0) {
-    return { ...nimble, source: "nimble" };
-  }
-
+  // No fallback scraper — an empty/failed pull surfaces as null so the caller
+  // can return an honest "couldn't pull reviews" error instead of silently
+  // spending money elsewhere.
   return null;
 }
 
@@ -64,8 +60,8 @@ export async function getBusinessReviews(
  *   2. a LOWEST-RATING batch (negativesOnly) — guarantees the 1–2★ fraud
  *      evidence is in the set even when it's old or buried.
  * We keep the per-batch size modest so total reviews billed/analyzed stays
- * reasonable. Falls back to the plain `getBusinessReviews` path (incl. the
- * Nimble fallback) if Outscraper isn't the source or the blend comes up empty.
+ * reasonable. If the blend comes up empty, one plain `getBusinessReviews`
+ * retry (same vendor, Outscraper) runs before we give up and return null.
  */
 export async function getBlendedReviews(
   input: string,
@@ -83,9 +79,9 @@ export async function getBlendedReviews(
     scrapeViaOutscraper(input, negativesN, { negativesOnly: true }),
   ]);
 
-  // If Outscraper produced nothing on either batch, fall back to the standard
-  // path (which also tries the Nimble fallback). This keeps the free scan
-  // resilient when Outscraper is unconfigured/erroring.
+  // If Outscraper produced nothing on either batch, retry once via the plain
+  // path (still Outscraper — no other vendor). If that also fails, the caller
+  // returns an honest error.
   if (
     (!newest || newest.reviews.length === 0) &&
     (!negatives || negatives.reviews.length === 0)

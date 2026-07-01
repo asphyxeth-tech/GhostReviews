@@ -1,9 +1,9 @@
 // Outscraper-backed Google reviews source.
 //
 // Why Outscraper: clean, structured review JSON (named fields — no guessing at
-// Google's internal array offsets like the Nimble path), pure pay-as-you-go
-// (500 free reviews/month, then ~$3/1k), and — crucially — it has BOTH a
-// synchronous and an asynchronous mode:
+// Google's internal array offsets like the legacy Nimble scraper required),
+// pure pay-as-you-go (500 free reviews/month, then ~$3/1k), and — crucially —
+// it has BOTH a synchronous and an asynchronous mode:
 //
 //   - sync  (async=false): one HTTP call, returns in seconds for small pulls.
 //     This is what the fast "instant scan" uses.
@@ -11,16 +11,64 @@
 //     (minutes OK). This is for the deep audit, where there's no time ceiling.
 //
 // Either way, if Outscraper isn't configured / errors / is too slow, this
-// returns null and the caller (src/lib/reviews.ts) falls back to Nimble.
+// returns null and the caller (src/lib/reviews.ts) surfaces an honest error.
+// There is no fallback scraper — Outscraper is the ONLY review source
+// (docs/COST_OVERHAUL.md §3 item 6).
 import type { RatingSummary, Review } from "./analysis-schema";
-import { deriveSearchQuery } from "./nimble";
 
 const BASE_URL = "https://api.app.outscraper.com";
 const REVIEWS_PATH = "/maps/reviews-v3";
 
-// Sync mode: bounded so a slow response fails over to Nimble instead of
+// Sync mode: bounded so a slow response fails fast (honest error) instead of
 // hanging the instant scan. Most 40-review sync pulls return well inside this.
 const SYNC_TIMEOUT_MS = 25000;
+// Following a maps.app.goo.gl short link (inside deriveSearchQuery) gets its
+// own, tighter timeout.
+const SHORTLINK_TIMEOUT_MS = 8000;
+
+/**
+ * Turn whatever the owner pasted — a business name, a "name + city" string, a
+ * full Google Maps URL, or a maps.app.goo.gl short link — into the plain-text
+ * query we send Outscraper. This normalized string is computed BEFORE any paid
+ * call, which also makes it the natural cache key for scan results.
+ * (Moved here from the deleted nimble.ts — it was never Nimble-specific.)
+ */
+export async function deriveSearchQuery(input: string): Promise<string> {
+  const raw = input.trim();
+  let target = raw;
+
+  if (/^https?:\/\/(maps\.app\.goo\.gl|goo\.gl)\//i.test(raw)) {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), SHORTLINK_TIMEOUT_MS);
+    try {
+      const res = await fetch(raw, {
+        redirect: "follow",
+        signal: controller.signal,
+      });
+      target = res.url || raw;
+    } catch {
+      target = raw;
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  const placeMatch = target.match(/\/maps\/place\/([^/@]+)/);
+  if (placeMatch) {
+    const name = decodeURIComponent(placeMatch[1].replace(/\+/g, " ")).trim();
+    if (name) return name;
+  }
+
+  try {
+    const u = new URL(target);
+    const q = u.searchParams.get("q") || u.searchParams.get("query");
+    if (q) return q.trim();
+  } catch {
+    // Not a URL — it's a typed query like "Joe's Pizza NYC".
+  }
+
+  return raw;
+}
 // Async mode (deep audit): polling budget + interval. Minutes are fine here.
 const ASYNC_TRIGGER_TIMEOUT_MS = 20000;
 const ASYNC_POLL_BUDGET_MS = 240000;
@@ -312,7 +360,8 @@ async function fetchAsync(
 /**
  * Top-level entry point. Returns null (never throws) when Outscraper is
  * unconfigured, the business can't be resolved, or no reviews come back in
- * time — the caller falls back to Nimble on null.
+ * time — callers treat null as an honest failure (there is no fallback
+ * scraper).
  */
 export async function scrapeBusinessReviews(
   input: string,
