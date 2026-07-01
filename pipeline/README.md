@@ -14,7 +14,7 @@ Reviews come from the **Nimble** API when `NIMBLE_API_KEY` is set in the environ
 
 | Mode | When | Behavior |
 | --- | --- | --- |
-| **live** | `ANTHROPIC_API_KEY` is set in the environment | Calls Claude (Anthropic) with adaptive thinking + structured outputs + prompt caching |
+| **live** | `ANTHROPIC_API_KEY` is set in the environment | Calls Claude (Anthropic) with adaptive thinking + structured outputs. (No prompt caching — the system prompt is below the 4,096-token cacheable minimum, so a `cache_control` marker would be a silent no-op; see `docs/COST_OVERHAUL.md` §5.) |
 | **stub** | No `ANTHROPIC_API_KEY` set | Returns the canned `mock_report.json`. Lets the pipeline run end-to-end without burning tokens, useful for verifying Tower deploy/wiring. |
 
 ## Prerequisites
@@ -78,7 +78,7 @@ tower apps logs ghost-reviews
 
 ## Parity with the web app
 
-The system prompt, analysis framework, and report schema are kept in lockstep between this Python pipeline and the Next.js app. The prompt text in `SYSTEM_PROMPT` here matches the one in [`src/lib/anthropic.ts`](../src/lib/anthropic.ts), and the JSON Schema in `ANALYSIS_REPORT_SCHEMA` encodes the same shape as the Zod schema in [`src/lib/analysis-schema.ts`](../src/lib/analysis-schema.ts) — Zod and JSON Schema in their respective formats. If you modify the analysis behavior, update both — there's no shared source of truth yet (intentional: keeping the surfaces decoupled for the MVP). The bundled `mock_reviews.json` and `mock_report.json` ARE shared — the Next.js app imports them directly via [`src/lib/mock-data.ts`](../src/lib/mock-data.ts).
+The system prompt, analysis framework, and report schema are kept in lockstep between this Python pipeline and the Next.js app. The prompt text in `SYSTEM_PROMPT` here matches the signed-in (full-report) prompt composed in [`src/lib/anthropic.ts`](../src/lib/anthropic.ts) — the web app additionally has an anonymous variant that skips removal drafts (a cost measure); this pipeline always produces the full report. Both sides also send Claude the same slimmed review payload: six fields per review (`id`, `reviewer_name`, `reviewer_total_reviews`, `rating`, `posted_at`, `text`) as compact JSON. The JSON Schema in `ANALYSIS_REPORT_SCHEMA` encodes the same shape as the Zod schema in [`src/lib/analysis-schema.ts`](../src/lib/analysis-schema.ts) — Zod and JSON Schema in their respective formats. If you modify the analysis behavior, update both — there's no shared source of truth yet (intentional: keeping the surfaces decoupled for the MVP). The bundled `mock_reviews.json` and `mock_report.json` ARE shared — the Next.js app imports them directly via [`src/lib/mock-data.ts`](../src/lib/mock-data.ts).
 
 ## Web app integration
 

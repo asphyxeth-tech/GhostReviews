@@ -627,11 +627,30 @@ def analyze_with_claude(
             "reviews above represent a rating-distribution anomaly."
         )
 
+    # Slim payload (lockstep with src/lib/anthropic.ts): send only the six
+    # fields the analysis actually uses, as COMPACT JSON (no indent). Extra
+    # fields some sources attach (review links, author ids) are never part of
+    # the output schema, and pretty-printing was pure token overhead —
+    # together this cuts input tokens roughly in half.
+    slim_reviews = [
+        {
+            "id": r.get("id"),
+            "reviewer_name": r.get("reviewer_name"),
+            "reviewer_total_reviews": r.get("reviewer_total_reviews"),
+            "rating": r.get("rating"),
+            "posted_at": r.get("posted_at"),
+            "text": r.get("text"),
+        }
+        for r in reviews
+    ]
+
     user_prompt = (
         f"Analyze the following {len(reviews)} Google reviews "
         f"for the business at: {business_url}\n\n"
         f"Recent review data (JSON):\n"
-        f"{json.dumps(reviews, indent=2)}"
+        # ensure_ascii=False matches JS JSON.stringify (literal accents/emoji
+        # instead of \uXXXX escapes — same bytes as the web path, fewer tokens).
+        f"{json.dumps(slim_reviews, separators=(',', ':'), ensure_ascii=False)}"
         f"{distribution_context}\n\n"
         "Apply your analysis framework and return a structured report. "
         "Flag only reviews showing genuine policy-violation signals; "
@@ -643,19 +662,18 @@ def analyze_with_claude(
         max_tokens=16000,
         thinking={"type": "adaptive"},
         output_config={
-            "effort": "high",
+            # "medium" matches the web path (WEB_ANALYSIS_EFFORT in
+            # src/app/api/analyze/route.ts) — the deep audit's edge is
+            # review DEPTH, not extra model effort.
+            "effort": "medium",
             "format": {
                 "type": "json_schema",
                 "schema": ANALYSIS_REPORT_SCHEMA,
             },
         },
-        system=[
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
+        # No cache_control: prompt caching is a closed topic below 4,096-token
+        # prompts (docs/COST_OVERHAUL.md §5).
+        system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_prompt}],
     )
 

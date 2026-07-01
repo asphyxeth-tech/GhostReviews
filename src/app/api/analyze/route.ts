@@ -37,19 +37,31 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { url } = RequestSchema.parse(body);
 
-    // Signed-in users get the full report and skip the rate limit; anonymous
-    // visitors get a gated teaser and are throttled (abuse/cost protection).
+    // Signed-in users get the full report; anonymous visitors get a gated
+    // teaser. EVERYONE is rate-limited: every scan draws from the same
+    // "analyze" bucket, so the global daily ceiling counts signed-in and
+    // anonymous scans alike — rotating free magic-link accounts no longer
+    // bypasses the cost cap (docs/COST_OVERHAUL.md §3.3). Fairness caps
+    // differ by caller type:
+    //   - anonymous: per-IP throttle (defaults in rate-limit.ts: 5/hour)
+    //   - signed-in: per-user throttle, 15 scans per rolling 24h, keyed on
+    //     the user id so it survives IP changes
     let isAuthed = false;
+    let userId = "";
     const supabase = await createSupabaseServer();
     if (supabase) {
       const { data } = await supabase.auth.getUser();
       isAuthed = Boolean(data.user);
+      userId = data.user?.id ?? "";
     }
-    if (!isAuthed) {
-      const limit = await checkRateLimit("analyze", clientIp(req));
-      if (!limit.ok) {
-        return NextResponse.json({ error: limit.reason }, { status: 429 });
-      }
+    const limit = isAuthed
+      ? await checkRateLimit("analyze", `user:${userId}`, {
+          perIp: 15,
+          windowMin: 1440,
+        })
+      : await checkRateLimit("analyze", clientIp(req));
+    if (!limit.ok) {
+      return NextResponse.json({ error: limit.reason }, { status: 429 });
     }
 
     // SAFETY (no fabricated attacks): if Claude isn't configured we must NEVER
@@ -77,10 +89,10 @@ export async function POST(req: NextRequest) {
     const scrape = await getBlendedReviews(url, WEB_MAX_REVIEWS);
     const haveLive = Boolean(scrape && scrape.reviews.length > 0);
 
-    // SAFETY (no fabricated attacks): if the live scrape came back empty (both
-    // Outscraper AND the Nimble fallback failed, or the URL didn't resolve to a
-    // real Google place), return an honest error. We do NOT analyze mock data
-    // and hand a public visitor a fake attack on their own business.
+    // SAFETY (no fabricated attacks): if the live scrape came back empty
+    // (Outscraper failed, or the URL didn't resolve to a real Google place),
+    // return an honest error. We do NOT analyze mock data and hand a public
+    // visitor a fake attack on their own business.
     if (!haveLive) {
       return NextResponse.json(
         {
@@ -92,19 +104,27 @@ export async function POST(req: NextRequest) {
     }
 
     const reviews = scrape!.reviews;
-    const reviewsSource: "outscraper" | "nimble" = scrape!.source;
+    // "nimble" only survives in the persisted-scan type for old saved rows and
+    // the legacy Tower pipeline; the web path is Outscraper-only now.
+    const reviewsSource: "outscraper" = scrape!.source;
 
+    // isAuthed also picks the Claude output shape: anonymous scans skip the
+    // removal-draft generation entirely (they were being paid for at Opus
+    // output rates and then stripped below) while the per-review reasoning
+    // requirement is unchanged — see analyzeReviewsWithClaude.
     const report = await analyzeReviewsWithClaude(
       url,
       reviews,
       scrape!.rating_summary,
       WEB_ANALYSIS_EFFORT,
+      isAuthed,
     );
 
     // Gate the deliverable for anonymous users: strip the per-review detail
-    // (reasoning + drafted removal requests) and expose only the count. Signed-
-    // in users get the full report. The gating is server-side so the API never
-    // emits the drafts to an anonymous caller.
+    // and expose only the count. (Anonymous runs no longer generate removal
+    // drafts at all — see analyzeReviewsWithClaude — so nothing expensive is
+    // thrown away here.) Signed-in users get the full report. The gating is
+    // server-side so per-review detail never reaches an anonymous caller.
     const flaggedCount = report.flagged_reviews.length;
     const visibleReport = isAuthed
       ? report

@@ -106,7 +106,7 @@ export async function checkRateLimit(
         return {
           ok: false,
           reason:
-            "You've hit the free-scan limit for now. Create a free account for unlimited scans, or try again a little later.",
+            "You've hit the scan limit for now — try again a little later.",
         };
       }
     }
@@ -122,7 +122,7 @@ export async function checkRateLimit(
       return {
         ok: false,
         reason:
-          "We're at capacity for free scans today. Create a free account, or try again tomorrow.",
+          "We're at capacity for scans today — please try again tomorrow.",
       };
     }
 
