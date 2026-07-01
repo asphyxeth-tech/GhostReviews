@@ -17,7 +17,10 @@ import { createSupabaseAdmin } from "./admin";
 
 const DEFAULT_PER_IP = 5; // anonymous scans per IP per window
 const DEFAULT_WINDOW_MIN = 60;
-const DEFAULT_GLOBAL_DAILY = 200; // total anonymous scans/day across all IPs
+// Total anonymous scans/day across all IPs. Real traffic is single-digit
+// scans/day, so 50 already leaves 5-10x headroom — raising this is a
+// deliberate spending decision, not a tuning tweak.
+const DEFAULT_GLOBAL_DAILY = 50;
 
 // Buckets that gate an expensive or paid action. On a CONFIGURED-but-erroring
 // store these fail CLOSED (deny) instead of open, so a Supabase blip can't be
